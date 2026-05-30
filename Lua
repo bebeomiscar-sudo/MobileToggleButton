@@ -1,0 +1,271 @@
+-- MobileToggle Addon for LinoriaLib Modified
+-- Floating draggable button to open/close the menu on mobile
+-- Usage:
+--   local MobileToggle = loadstring(...)()
+--   MobileToggle:SetLibrary(Library)
+--   MobileToggle:Create({ Text = 'Menu', Size = 56 })
+
+local MobileToggle = {}
+
+local Players       = game:GetService('Players')
+local InputService  = game:GetService('UserInputService')
+local TweenService  = game:GetService('TweenService')
+local RunService    = game:GetService('RunService')
+local CoreGui       = game:GetService('CoreGui')
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ─────────────────────────────────────────────────────────────
+-- Internal state
+-- ─────────────────────────────────────────────────────────────
+local Library    = nil
+local ButtonGui  = nil
+local ButtonFrame = nil
+local IsMobile   = InputService.TouchEnabled and not InputService.KeyboardEnabled
+
+function MobileToggle:SetLibrary(Lib)
+    Library = Lib
+end
+
+-- ─────────────────────────────────────────────────────────────
+-- Create the floating button
+-- Config:
+--   Text     string   Label on the button (default 'Menu')
+--   Size     number   Button diameter in pixels (default 56)
+--   Position UDim2    Starting position (default bottom-right)
+--   AlwaysShow bool   Show even on PC (default false, mobile-only)
+-- ─────────────────────────────────────────────────────────────
+function MobileToggle:Create(Config)
+    Config = Config or {}
+
+    local Text       = Config.Text       or 'Menu'
+    local BtnSize    = Config.Size       or 56
+    local AlwaysShow = Config.AlwaysShow or false
+
+    -- Skip on PC unless forced
+    if not IsMobile and not AlwaysShow then return end
+
+    assert(Library, 'MobileToggle: Call SetLibrary(Library) before Create().')
+
+    local AccentColor     = Library.AccentColor
+    local AccentColorDark = Library.AccentColorDark or Library:GetDarkerColor(AccentColor)
+    local MainColor       = Library.MainColor
+    local FontColor       = Library.FontColor
+    local Font            = Library.Font
+
+    -- Screen dimensions helper
+    local function GetScreenSize()
+        local cam = workspace.CurrentCamera
+        return cam and cam.ViewportSize or Vector2.new(800, 600)
+    end
+
+    local screen   = GetScreenSize()
+    local startPos = Config.Position or UDim2.fromOffset(
+        screen.X - BtnSize - 16,
+        screen.Y - BtnSize - 80
+    )
+
+    -- ── GUI ──────────────────────────────────────────────────
+    ButtonGui = Instance.new('ScreenGui')
+    ButtonGui.Name           = 'MobileToggleGui'
+    ButtonGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    ButtonGui.DisplayOrder   = 999
+    ButtonGui.ResetOnSpawn   = false
+
+    local ok = pcall(function()
+        local protect = protectgui or (syn and syn.protect_gui)
+        if protect then protect(ButtonGui) end
+    end)
+
+    ButtonGui.Parent = CoreGui
+
+    -- Outer circle (shadow ring)
+    local Shadow = Instance.new('Frame')
+    Shadow.Name             = 'Shadow'
+    Shadow.BackgroundColor3 = Color3.new(0, 0, 0)
+    Shadow.BackgroundTransparency = 0.5
+    Shadow.BorderSizePixel  = 0
+    Shadow.AnchorPoint      = Vector2.new(0.5, 0.5)
+    Shadow.Position         = UDim2.fromOffset(startPos.X.Offset + BtnSize/2, startPos.Y.Offset + BtnSize/2)
+    Shadow.Size             = UDim2.fromOffset(BtnSize + 6, BtnSize + 6)
+    Shadow.ZIndex           = 10
+    Shadow.Parent           = ButtonGui
+    Instance.new('UICorner', Shadow).CornerRadius = UDim.new(1, 0)
+
+    -- Main button frame
+    ButtonFrame = Instance.new('Frame')
+    ButtonFrame.Name             = 'MobileToggleBtn'
+    ButtonFrame.BackgroundColor3 = AccentColor
+    ButtonFrame.BorderSizePixel  = 0
+    ButtonFrame.AnchorPoint      = Vector2.new(0.5, 0.5)
+    ButtonFrame.Position         = UDim2.fromOffset(startPos.X.Offset + BtnSize/2, startPos.Y.Offset + BtnSize/2)
+    ButtonFrame.Size             = UDim2.fromOffset(BtnSize, BtnSize)
+    ButtonFrame.ZIndex           = 11
+    ButtonFrame.Parent           = ButtonGui
+    Instance.new('UICorner', ButtonFrame).CornerRadius = UDim.new(1, 0)
+
+    -- Gradient on button
+    local Grad = Instance.new('UIGradient')
+    Grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, AccentColor),
+        ColorSequenceKeypoint.new(1, AccentColorDark),
+    })
+    Grad.Rotation = 135
+    Grad.Parent = ButtonFrame
+
+    -- Icon / label
+    local Label = Instance.new('TextLabel')
+    Label.BackgroundTransparency = 1
+    Label.Size                   = UDim2.fromScale(1, 1)
+    Label.Font                   = Font or Enum.Font.GothamBold
+    Label.Text                   = Text
+    Label.TextColor3             = Color3.new(1, 1, 1)
+    Label.TextSize               = math.floor(BtnSize * 0.28)
+    Label.TextStrokeTransparency = 0.6
+    Label.ZIndex                 = 12
+    Label.Parent                 = ButtonFrame
+
+    -- Active indicator dot (shows menu is open)
+    local Dot = Instance.new('Frame')
+    Dot.Name             = 'ActiveDot'
+    Dot.BackgroundColor3 = Color3.fromRGB(80, 255, 120)
+    Dot.BorderSizePixel  = 0
+    Dot.AnchorPoint      = Vector2.new(1, 0)
+    Dot.Position         = UDim2.new(1, -4, 0, 4)
+    Dot.Size             = UDim2.fromOffset(10, 10)
+    Dot.ZIndex           = 13
+    Dot.Visible          = false
+    Dot.Parent           = ButtonFrame
+    Instance.new('UICorner', Dot).CornerRadius = UDim.new(1, 0)
+
+    -- ── DRAG ─────────────────────────────────────────────────
+    local dragging   = false
+    local dragStart  = Vector2.new()
+    local frameStart = Vector2.new()
+    local wasDrag    = false  -- distinguish tap vs drag
+
+    local function GetTouchPos(Input)
+        return Vector2.new(Input.Position.X, Input.Position.Y)
+    end
+
+    ButtonFrame.InputBegan:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.Touch
+        and Input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+
+        dragging   = true
+        wasDrag    = false
+        dragStart  = GetTouchPos(Input)
+        frameStart = Vector2.new(
+            ButtonFrame.Position.X.Offset,
+            ButtonFrame.Position.Y.Offset
+        )
+
+        Input.Changed:Connect(function()
+            if Input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end)
+
+    ButtonFrame.InputChanged:Connect(function(Input)
+        if not dragging then return end
+        if Input.UserInputType ~= Enum.UserInputType.MouseMovement
+        and Input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        local pos   = GetTouchPos(Input)
+        local delta = pos - dragStart
+
+        -- If moved more than 6px it's a drag not a tap
+        if delta.Magnitude > 6 then wasDrag = true end
+
+        local sc = GetScreenSize()
+        local newX = math.clamp(frameStart.X + delta.X, BtnSize/2, sc.X - BtnSize/2)
+        local newY = math.clamp(frameStart.Y + delta.Y, BtnSize/2, sc.Y - BtnSize/2)
+
+        ButtonFrame.Position = UDim2.fromOffset(newX, newY)
+        Shadow.Position      = UDim2.fromOffset(newX, newY)
+    end)
+
+    InputService.InputEnded:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.Touch
+        and Input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        dragging = false
+    end)
+
+    -- ── TAP TO TOGGLE ─────────────────────────────────────────
+    ButtonFrame.InputEnded:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.Touch
+        and Input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        if wasDrag then return end  -- was a drag, not a tap
+
+        -- Pulse animation
+        TweenService:Create(ButtonFrame, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.fromOffset(BtnSize * 0.88, BtnSize * 0.88)
+        }):Play()
+        task.delay(0.08, function()
+            TweenService:Create(ButtonFrame, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = UDim2.fromOffset(BtnSize, BtnSize)
+            }):Play()
+        end)
+
+        task.spawn(Library.Toggle)
+    end)
+
+    -- ── SYNC DOT WITH MENU STATE ──────────────────────────────
+    -- We watch the Window holder visibility to sync the dot
+    -- (Library.Toggle flips Outer.Visible after the fade)
+    task.spawn(function()
+        while ButtonFrame and ButtonFrame.Parent do
+            -- Find the main window frame
+            local windowVisible = false
+            for _, gui in next, CoreGui:GetChildren() do
+                if gui == Library.ScreenGui then
+                    for _, child in next, gui:GetChildren() do
+                        if child:IsA('Frame') and child.ZIndex == 1 and child.Visible then
+                            windowVisible = true
+                            break
+                        end
+                    end
+                end
+            end
+            Dot.Visible = windowVisible
+            RunService.Heartbeat:Wait()
+        end
+    end)
+
+    -- ── UPDATE ACCENT COLOR WHEN LIBRARY THEME CHANGES ───────
+    -- Poll every second since there's no event for color change
+    task.spawn(function()
+        while ButtonFrame and ButtonFrame.Parent do
+            if Library.AccentColor ~= AccentColor then
+                AccentColor     = Library.AccentColor
+                AccentColorDark = Library:GetDarkerColor(AccentColor)
+                ButtonFrame.BackgroundColor3 = AccentColor
+                Grad.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, AccentColor),
+                    ColorSequenceKeypoint.new(1, AccentColorDark),
+                })
+            end
+            task.wait(1)
+        end
+    end)
+
+    MobileToggle.Button = ButtonFrame
+    MobileToggle.Shadow = Shadow
+    MobileToggle.Gui    = ButtonGui
+
+    return MobileToggle
+end
+
+-- Hide or show the button
+function MobileToggle:SetVisible(Bool)
+    if ButtonFrame then ButtonFrame.Visible = Bool end
+    if Shadow      then Shadow.Visible      = Bool end
+end
+
+-- Destroy the button
+function MobileToggle:Destroy()
+    if ButtonGui then ButtonGui:Destroy() end
+end
+
+return MobileToggle

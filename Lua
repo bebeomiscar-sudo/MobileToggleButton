@@ -1,271 +1,1012 @@
--- MobileToggle Addon for LinoriaLib Modified
--- Floating draggable button to open/close the menu on mobile
--- Usage:
---   local MobileToggle = loadstring(...)()
---   MobileToggle:SetLibrary(Library)
---   MobileToggle:Create({ Text = 'Menu', Size = 56 })
+-- ============================================================
+--  UI LIBRARY: "Instance" Themed (FULL VISUALS)
+--  Features: ESP, Utility ESP, Lighting, Crosshair, Config
+--  Logo ID: 104730525251939
+-- ============================================================
 
-local MobileToggle = {}
-
-local Players       = game:GetService('Players')
-local InputService  = game:GetService('UserInputService')
-local TweenService  = game:GetService('TweenService')
-local RunService    = game:GetService('RunService')
-local CoreGui       = game:GetService('CoreGui')
-
+local Library = {}
+local Drawing = Drawing
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- ─────────────────────────────────────────────────────────────
--- Internal state
--- ─────────────────────────────────────────────────────────────
-local Library    = nil
-local ButtonGui  = nil
-local ButtonFrame = nil
-local IsMobile   = InputService.TouchEnabled and not InputService.KeyboardEnabled
+-- ============================================================
+--  CONFIGURATION & STATE
+-- ============================================================
 
-function MobileToggle:SetLibrary(Lib)
-    Library = Lib
+Library.Config = {
+    Theme = {
+        AccentColor = Color3.fromRGB(147, 72, 255),
+        MainColor = Color3.fromRGB(18, 18, 22),
+        TextColor = Color3.fromRGB(235, 235, 235),
+        ErrorColor = Color3.fromRGB(255, 60, 60)
+    },
+    WindowPos = Vector2.new(200, 100),
+    Mobile = {
+        Visible = false,
+        ButtonPos = Vector2.new(20, 20)
+    },
+    Box = {
+        MasterEnabled = false,
+        Enable = false,
+        OutlineColor = Color3.fromRGB(255, 255, 255),
+        FillColor = Color3.fromRGB(255, 255, 255),
+        Filled = { Enable = false, Transparency = 0.5, ColorStart = Color3.fromRGB(119, 0, 255), ColorEnd = Color3.fromRGB(0, 0, 0), Rotation = 0, Animated = false, Speed = 1 },
+        Glow = { Enable = false, Transparency = 0.5, ColorStart = Color3.fromRGB(96, 0, 255), ColorEnd = Color3.fromRGB(173, 173, 215), Rotation = 0 },
+        Healthbar = { Enable = false, Thickness = 4 },
+        HealthLerpColors = { Color1 = Color3.fromRGB(104, 0, 255), Color2 = Color3.fromRGB(12, 0, 255), Color3 = Color3.fromRGB(0, 0, 0) }
+    },
+    TextESP = { Names = false, Distance = false, Tools = false, NameSize = 8, DistanceSize = 8, ToolsSize = 8, NameColor = Color3.fromRGB(255, 255, 255), DistanceColor = Color3.fromRGB(255, 255, 255), ToolColor = Color3.fromRGB(255, 255, 255) },
+    Skeleton = { Enable = false, Color = Color3.fromRGB(255, 255, 255), Thickness = 1 },
+    Tracers = { Enable = false, Color = Color3.fromRGB(255, 255, 255), Thickness = 1, FromBottom = true },
+    Chams = { Enable = false, Color = Color3.fromRGB(255, 255, 255), Transparency = 0 },
+    Utility = { Enable = false, Color = Color3.fromRGB(104, 0, 255), Distance = false, Selected = {} },
+    Lighting = {
+        Enabled = false,
+        Ambient = { Enabled = false, Color = Color3.fromRGB(255, 255, 255) },
+        OutdoorAmbient = { Enabled = false, Color = Color3.fromRGB(165, 165, 165) },
+        Brightness = { Enabled = false, Value = 3 },
+        GlobalShadows = { Enabled = true },
+        ShadowSoftness = { Enabled = false, Value = 0.2 },
+        SunColor = { Enabled = false, Color = Color3.fromRGB(255, 220, 150) },
+        ColorShiftTop = { Enabled = false, Color = Color3.fromRGB(255, 100, 100) },
+        ColorShiftBottom = { Enabled = false, Color = Color3.fromRGB(0, 50, 150) },
+        ClockTime = { Enabled = false, Value = 12 },
+        GeographicLatitude = { Enabled = false, Value = 41.8 },
+        Fog = { Enabled = false, Color = Color3.fromRGB(100, 100, 150), Start = 0, End = 100 },
+        EnvironmentDiffuseScale = { Enabled = false, Value = 1 },
+        EnvironmentSpecularScale = { Enabled = false, Value = 1 },
+    },
+    Crosshair = {
+        enabled = false,
+        mode = "mouse",
+        crosshair_mode = "static",
+        width = 1.5,
+        length = 10,
+        radius = 11,
+        crosshair_color = Color3.fromRGB(0, 85, 255),
+        color1 = Color3.fromRGB(255, 0, 128),
+        color2 = Color3.fromRGB(0, 186, 255),
+        color3 = Color3.fromRGB(128, 0, 255),
+        gradient_rotation = 0,
+        spin = true,
+        spin_speed = 150,
+        spin_max = 340,
+        spin_style = Enum.EasingStyle.Sine,
+        resize = true,
+        resize_speed = 150,
+        resize_min = 5,
+        resize_max = 22,
+        scale_min = 1,
+        scale_max = 1,
+        show_ammo = false,
+        show_watermark = true,
+        show_lines = true,
+    },
+    AutoLoad = true
+}
+
+-- Internal State
+Library._open = false
+Library._uiElements = {}
+Library._drawings = {}
+Library._isMobile = false
+Library._window = nil
+
+-- ============================================================
+--  HELPER FUNCTIONS
+-- ============================================================
+
+function Library:IsMobile()
+    if self._isMobile then return true end
+    local inputType = UserInputService:GetLastInputType()
+    if inputType == Enum.UserInputType.Touch then 
+        self._isMobile = true
+        return true
+    end
+    return false
 end
 
--- ─────────────────────────────────────────────────────────────
--- Create the floating button
--- Config:
---   Text     string   Label on the button (default 'Menu')
---   Size     number   Button diameter in pixels (default 56)
---   Position UDim2    Starting position (default bottom-right)
---   AlwaysShow bool   Show even on PC (default false, mobile-only)
--- ─────────────────────────────────────────────────────────────
-function MobileToggle:Create(Config)
-    Config = Config or {}
+-- ============================================================
+--  UI DRAWING ENGINE
+-- ============================================================
 
-    local Text       = Config.Text       or 'Menu'
-    local BtnSize    = Config.Size       or 56
-    local AlwaysShow = Config.AlwaysShow or false
+local Canvas = Instance.new("ScreenGui")
+Canvas.Name = "InstanceUI"
+Canvas.ResetOnSpawn = false
+Canvas.Parent = CoreGui
 
-    -- Skip on PC unless forced
-    if not IsMobile and not AlwaysShow then return end
+-- "OPEN" Mobile Button
+local MobileButton = Instance.new("TextButton")
+MobileButton.Name = "MobileOpen"
+MobileButton.Size = UDim2.new(0, 60, 0, 60)
+MobileButton.Position = UDim2.fromOffset(20, 20)
+MobileButton.Text = "OPEN"
+MobileButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MobileButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MobileButton.Font = Enum.Font.GothamBold
+MobileButton.TextSize = 20
+MobileButton.Visible = false
+MobileButton.Parent = Canvas
 
-    assert(Library, 'MobileToggle: Call SetLibrary(Library) before Create().')
+local function CreateWindow()
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(0, 750, 0, 550) -- Larger to fit all visual features
+    Frame.Position = UDim2.new(0.5, -375, 0.5, -275)
+    Frame.BackgroundColor3 = Library.Config.Theme.MainColor
+    Frame.BorderSizePixel = 0
+    Frame.Visible = false
+    Frame.Parent = Canvas
+    Frame.Active = true
+    Frame.Draggable = true
 
-    local AccentColor     = Library.AccentColor
-    local AccentColorDark = Library.AccentColorDark or Library:GetDarkerColor(AccentColor)
-    local MainColor       = Library.MainColor
-    local FontColor       = Library.FontColor
-    local Font            = Library.Font
+    -- UI Title / Header
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 30)
+    TitleBar.BackgroundColor3 = Library.Config.Theme.MainColor
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = Frame
 
-    -- Screen dimensions helper
-    local function GetScreenSize()
-        local cam = workspace.CurrentCamera
-        return cam and cam.ViewportSize or Vector2.new(800, 600)
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Text = "instance | ui"
+    TitleLabel.Size = UDim2.new(0.5, 0, 1, 0)
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.TextColor3 = Library.Config.Theme.TextColor
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextSize = 16
+    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+    TitleLabel.Parent = TitleBar
+
+    -- ** YOUR LOGO HERE **
+    local Logo = Instance.new("ImageLabel")
+    Logo.Image = "rbxassetid://104730525251939"
+    Logo.Size = UDim2.new(0, 40, 0, 40)
+    Logo.Position = UDim2.new(1, -50, 0, -5)
+    Logo.BackgroundTransparency = 1
+    Logo.ScaleType = Enum.ScaleType.Fit
+    Logo.Parent = TitleBar
+
+    -- Close Button
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+    CloseBtn.Position = UDim2.new(1, -35, 0, 0)
+    CloseBtn.Text = "X"
+    CloseBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+    CloseBtn.TextColor3 = Color3.new(1, 1, 1)
+    CloseBtn.Font = Enum.Font.GothamBold
+    CloseBtn.TextSize = 14
+    CloseBtn.Parent = TitleBar
+
+    -- Main Container
+    local Container = Instance.new("ScrollingFrame")
+    Container.Size = UDim2.new(1, 0, 1, -30)
+    Container.Position = UDim2.new(0, 0, 0, 30)
+    Container.BackgroundTransparency = 1
+    Container.BorderSizePixel = 0
+    Container.ScrollBarThickness = 2
+    Container.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Container.Parent = Frame
+
+    -- Tabs Bar
+    local TabsBar = Instance.new("Frame")
+    TabsBar.Size = UDim2.new(1, 0, 0, 20)
+    TabsBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    TabsBar.BorderSizePixel = 0
+    TabsBar.Parent = Container
+
+    local TabsLayout = Instance.new("UIListLayout")
+    TabsLayout.FillDirection = Enum.FillDirection.Horizontal
+    TabsLayout.Padding = UDim.new(0, 4)
+    TabsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    TabsLayout.Parent = TabsBar
+
+    local WindowObj = {
+        Frame = Frame,
+        Container = Container,
+        TabsBar = TabsBar,
+        Tabs = {},
+        CurrentTab = nil
+    }
+
+    CloseBtn.MouseButton1Click:Connect(function()
+        Library._open = false
+        Frame.Visible = false
+    end)
+
+    return WindowObj
+end
+
+-- ============================================================
+--  LIBRARY METHODS
+-- ============================================================
+
+function Library:CreateWindow()
+    if self._window then return self._window end
+    local win = CreateWindow()
+    self._window = win
+    
+    MobileButton.MouseButton1Click:Connect(function()
+        self._open = not self._open
+        win.Frame.Visible = self._open
+    end)
+    if not self:IsMobile() then
+        MobileButton.Visible = false
+    else
+        MobileButton.Visible = true
     end
 
-    local screen   = GetScreenSize()
-    local startPos = Config.Position or UDim2.fromOffset(
-        screen.X - BtnSize - 16,
-        screen.Y - BtnSize - 80
-    )
+    return win
+end
 
-    -- ── GUI ──────────────────────────────────────────────────
-    ButtonGui = Instance.new('ScreenGui')
-    ButtonGui.Name           = 'MobileToggleGui'
-    ButtonGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-    ButtonGui.DisplayOrder   = 999
-    ButtonGui.ResetOnSpawn   = false
+function Library:AddTab(window, name)
+    local tabContainer = Instance.new("ScrollingFrame")
+    tabContainer.Size = UDim2.new(1, 0, 1, -25)
+    tabContainer.Position = UDim2.new(0, 0, 0, 25)
+    tabContainer.BackgroundColor3 = Library.Config.Theme.MainColor
+    tabContainer.BorderSizePixel = 0
+    tabContainer.ScrollBarThickness = 2
+    tabContainer.Visible = false
+    tabContainer.Parent = window.Container
 
-    local ok = pcall(function()
-        local protect = protectgui or (syn and syn.protect_gui)
-        if protect then protect(ButtonGui) end
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 4)
+    layout.Parent = tabContainer
+
+    local tabBtn = Instance.new("TextButton")
+    tabBtn.Size = UDim2.new(0, 80, 0, 18)
+    tabBtn.Text = "  " .. name
+    tabBtn.BackgroundTransparency = 1
+    tabBtn.TextColor3 = Library.Config.Theme.TextColor
+    tabBtn.Font = Enum.Font.Gotham
+    tabBtn.TextSize = 12
+    tabBtn.TextXAlignment = Enum.TextXAlignment.Left
+    tabBtn.Parent = window.TabsBar
+
+    tabBtn.MouseButton1Click:Connect(function()
+        for _, tab in pairs(window.Tabs) do
+            tab.Container.Visible = false
+        end
+        tabContainer.Visible = true
+        window.CurrentTab = tabContainer
     end)
 
-    ButtonGui.Parent = CoreGui
+    local tabObj = { Container = tabContainer, Layout = layout, Button = tabBtn }
+    table.insert(window.Tabs, tabObj)
+    return tabObj
+end
 
-    -- Outer circle (shadow ring)
-    local Shadow = Instance.new('Frame')
-    Shadow.Name             = 'Shadow'
-    Shadow.BackgroundColor3 = Color3.new(0, 0, 0)
-    Shadow.BackgroundTransparency = 0.5
-    Shadow.BorderSizePixel  = 0
-    Shadow.AnchorPoint      = Vector2.new(0.5, 0.5)
-    Shadow.Position         = UDim2.fromOffset(startPos.X.Offset + BtnSize/2, startPos.Y.Offset + BtnSize/2)
-    Shadow.Size             = UDim2.fromOffset(BtnSize + 6, BtnSize + 6)
-    Shadow.ZIndex           = 10
-    Shadow.Parent           = ButtonGui
-    Instance.new('UICorner', Shadow).CornerRadius = UDim.new(1, 0)
+function Library:AddGroupbox(tab, name)
+    local group = Instance.new("Frame")
+    group.Size = UDim2.new(1, -10, 0, 60)
+    group.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    group.BorderSizePixel = 1
+    group.BorderColor3 = Color3.fromRGB(50, 50, 50)
+    group.Parent = tab.Container
 
-    -- Main button frame
-    ButtonFrame = Instance.new('Frame')
-    ButtonFrame.Name             = 'MobileToggleBtn'
-    ButtonFrame.BackgroundColor3 = AccentColor
-    ButtonFrame.BorderSizePixel  = 0
-    ButtonFrame.AnchorPoint      = Vector2.new(0.5, 0.5)
-    ButtonFrame.Position         = UDim2.fromOffset(startPos.X.Offset + BtnSize/2, startPos.Y.Offset + BtnSize/2)
-    ButtonFrame.Size             = UDim2.fromOffset(BtnSize, BtnSize)
-    ButtonFrame.ZIndex           = 11
-    ButtonFrame.Parent           = ButtonGui
-    Instance.new('UICorner', ButtonFrame).CornerRadius = UDim.new(1, 0)
+    local title = Instance.new("TextLabel")
+    title.Text = name
+    title.Size = UDim2.new(1, 0, 0, 20)
+    title.BackgroundTransparency = 1
+    title.TextColor3 = Library.Config.Theme.TextColor
+    title.Font = Enum.Font.Gotham
+    title.TextSize = 12
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Position = UDim2.new(0, 5, 0, 0)
+    title.Parent = group
 
-    -- Gradient on button
-    local Grad = Instance.new('UIGradient')
-    Grad.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, AccentColor),
-        ColorSequenceKeypoint.new(1, AccentColorDark),
-    })
-    Grad.Rotation = 135
-    Grad.Parent = ButtonFrame
+    local content = Instance.new("Frame")
+    content.Size = UDim2.new(1, -10, 0, 0)
+    content.Position = UDim2.new(0, 5, 0, 20)
+    content.BackgroundTransparency = 1
+    content.Parent = group
+    content.ClipsDescendants = true
 
-    -- Icon / label
-    local Label = Instance.new('TextLabel')
-    Label.BackgroundTransparency = 1
-    Label.Size                   = UDim2.fromScale(1, 1)
-    Label.Font                   = Font or Enum.Font.GothamBold
-    Label.Text                   = Text
-    Label.TextColor3             = Color3.new(1, 1, 1)
-    Label.TextSize               = math.floor(BtnSize * 0.28)
-    Label.TextStrokeTransparency = 0.6
-    Label.ZIndex                 = 12
-    Label.Parent                 = ButtonFrame
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 2)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = content
 
-    -- Active indicator dot (shows menu is open)
-    local Dot = Instance.new('Frame')
-    Dot.Name             = 'ActiveDot'
-    Dot.BackgroundColor3 = Color3.fromRGB(80, 255, 120)
-    Dot.BorderSizePixel  = 0
-    Dot.AnchorPoint      = Vector2.new(1, 0)
-    Dot.Position         = UDim2.new(1, -4, 0, 4)
-    Dot.Size             = UDim2.fromOffset(10, 10)
-    Dot.ZIndex           = 13
-    Dot.Visible          = false
-    Dot.Parent           = ButtonFrame
-    Instance.new('UICorner', Dot).CornerRadius = UDim.new(1, 0)
+    return {
+        Object = group,
+        Content = content,
+        Layout = layout
+    }
+end
 
-    -- ── DRAG ─────────────────────────────────────────────────
-    local dragging   = false
-    local dragStart  = Vector2.new()
-    local frameStart = Vector2.new()
-    local wasDrag    = false  -- distinguish tap vs drag
+function Library:AddLabel(groupbox, text)
+    local label = Instance.new("TextLabel")
+    label.Text = text
+    label.Size = UDim2.new(1, 0, 0, 18)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Library.Config.Theme.TextColor
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = groupbox.Content
+    return label
+end
 
-    local function GetTouchPos(Input)
-        return Vector2.new(Input.Position.X, Input.Position.Y)
+function Library:AddToggle(groupbox, text, default, onChange)
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Size = UDim2.new(1, 0, 0, 20)
+    toggleFrame.BackgroundTransparency = 1
+    toggleFrame.Parent = groupbox.Content
+
+    local label = Instance.new("TextLabel")
+    label.Text = text
+    label.Size = UDim2.new(0.5, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Library.Config.Theme.TextColor
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = toggleFrame
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(0, 40, 0, 16)
+    toggleBtn.Position = UDim2.new(1, -45, 0.5, -8)
+    toggleBtn.BackgroundColor3 = default and Library.Config.Theme.AccentColor or Color3.fromRGB(50, 50, 50)
+    toggleBtn.Text = ""
+    toggleBtn.Parent = toggleFrame
+    toggleBtn.ClipsDescendants = true
+
+    local circle = Instance.new("Frame")
+    circle.Size = UDim2.new(0, 12, 0, 12)
+    circle.Position = default and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
+    circle.BackgroundColor3 = Color3.new(1, 1, 1)
+    circle.Parent = toggleBtn
+
+    local state = default
+
+    local function updateVisual()
+        toggleBtn.BackgroundColor3 = state and Library.Config.Theme.AccentColor or Color3.fromRGB(50, 50, 50)
+        circle.Position = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
     end
 
-    ButtonFrame.InputBegan:Connect(function(Input)
-        if Input.UserInputType ~= Enum.UserInputType.Touch
-        and Input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-
-        dragging   = true
-        wasDrag    = false
-        dragStart  = GetTouchPos(Input)
-        frameStart = Vector2.new(
-            ButtonFrame.Position.X.Offset,
-            ButtonFrame.Position.Y.Offset
-        )
-
-        Input.Changed:Connect(function()
-            if Input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
+    toggleBtn.MouseButton1Click:Connect(function()
+        state = not state
+        updateVisual()
+        if onChange then onChange(state) end
     end)
 
-    ButtonFrame.InputChanged:Connect(function(Input)
-        if not dragging then return end
-        if Input.UserInputType ~= Enum.UserInputType.MouseMovement
-        and Input.UserInputType ~= Enum.UserInputType.Touch then return end
+    updateVisual()
+    return {
+        Set = function(val) state = val; updateVisual(); end,
+        Get = function() return state end
+    }
+end
 
-        local pos   = GetTouchPos(Input)
-        local delta = pos - dragStart
+function Library:AddColorPicker(groupbox, text, defaultColor, onChange)
+    local pickerFrame = Instance.new("Frame")
+    pickerFrame.Size = UDim2.new(1, 0, 0, 20)
+    pickerFrame.BackgroundTransparency = 1
+    pickerFrame.Parent = groupbox.Content
 
-        -- If moved more than 6px it's a drag not a tap
-        if delta.Magnitude > 6 then wasDrag = true end
+    local label = Instance.new("TextLabel")
+    label.Text = text
+    label.Size = UDim2.new(0.5, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Library.Config.Theme.TextColor
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = pickerFrame
 
-        local sc = GetScreenSize()
-        local newX = math.clamp(frameStart.X + delta.X, BtnSize/2, sc.X - BtnSize/2)
-        local newY = math.clamp(frameStart.Y + delta.Y, BtnSize/2, sc.Y - BtnSize/2)
+    local colorBox = Instance.new("Frame")
+    colorBox.Size = UDim2.new(0, 20, 0, 16)
+    colorBox.Position = UDim2.new(1, -25, 0.5, -8)
+    colorBox.BackgroundColor3 = defaultColor or Color3.new(1, 1, 1)
+    colorBox.Parent = pickerFrame
 
-        ButtonFrame.Position = UDim2.fromOffset(newX, newY)
-        Shadow.Position      = UDim2.fromOffset(newX, newY)
+    local currentColor = defaultColor or Color3.new(1, 1, 1)
+    
+    colorBox.MouseButton1Click:Connect(function()
+        local newColor = Color3.fromHSV(math.random()*360/360, 0.8, 1)
+        currentColor = newColor
+        colorBox.BackgroundColor3 = newColor
+        if onChange then onChange(newColor) end
     end)
 
-    InputService.InputEnded:Connect(function(Input)
-        if Input.UserInputType ~= Enum.UserInputType.Touch
-        and Input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    return {
+        Get = function() return currentColor end,
+        Set = function(col) currentColor = col; colorBox.BackgroundColor3 = col; end
+    }
+end
+
+function Library:AddSlider(groupbox, text, default, min, max, rounding, suffix, onChange)
+    local sliderFrame = Instance.new("Frame")
+    sliderFrame.Size = UDim2.new(1, 0, 0, 24)
+    sliderFrame.BackgroundTransparency = 1
+    sliderFrame.Parent = groupbox.Content
+
+    local label = Instance.new("TextLabel")
+    label.Text = text
+    label.Size = UDim2.new(0.4, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Library.Config.Theme.TextColor
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = sliderFrame
+
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Text = tostring(default) .. (suffix or "")
+    valueLabel.Size = UDim2.new(0.2, 0, 1, 0)
+    valueLabel.Position = UDim2.new(0.8, 0, 0, 0)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.TextColor3 = Library.Config.Theme.TextColor
+    valueLabel.Font = Enum.Font.Gotham
+    valueLabel.TextSize = 12
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valueLabel.Parent = sliderFrame
+
+    local slider = Instance.new("TextButton")
+    slider.Size = UDim2.new(0.6, 0, 0, 6)
+    slider.Position = UDim2.new(0.4, 0, 0.5, -3)
+    slider.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    slider.BorderSizePixel = 0
+    slider.Text = ""
+    slider.Parent = sliderFrame
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = Library.Config.Theme.AccentColor
+    fill.BorderSizePixel = 0
+    fill.Parent = slider
+
+    local value = default
+
+    local function updateSlider(percent)
+        percent = math.clamp(percent, 0, 1)
+        fill.Size = UDim2.new(percent, 0, 1, 0)
+        local raw = min + (max - min) * percent
+        local rounded = rounding and math.round(raw / rounding) * rounding or raw
+        value = math.clamp(rounded, min, max)
+        valueLabel.Text = tostring(value) .. (suffix or "")
+        if onChange then onChange(value) end
+    end
+
+    updateSlider((default - min) / (max - min))
+
+    local dragging = false
+    slider.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    slider.MouseButton1Up:Connect(function()
         dragging = false
     end)
+    slider.MouseMoved:Connect(function(x)
+        if dragging then
+            local pos = x - slider.AbsolutePosition.X
+            local pct = pos / slider.AbsoluteSize.X
+            updateSlider(pct)
+        end
+    end)
 
-    -- ── TAP TO TOGGLE ─────────────────────────────────────────
-    ButtonFrame.InputEnded:Connect(function(Input)
-        if Input.UserInputType ~= Enum.UserInputType.Touch
-        and Input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-        if wasDrag then return end  -- was a drag, not a tap
+    return {
+        Set = function(val) updateSlider((val - min) / (max - min)) end,
+        Get = function() return value end
+    }
+end
 
-        -- Pulse animation
-        TweenService:Create(ButtonFrame, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Size = UDim2.fromOffset(BtnSize * 0.88, BtnSize * 0.88)
-        }):Play()
-        task.delay(0.08, function()
-            TweenService:Create(ButtonFrame, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                Size = UDim2.fromOffset(BtnSize, BtnSize)
-            }):Play()
+function Library:AddDualSlider(groupbox, text1, text2, default1, default2, min, max, rounding, suffix1, suffix2, onChange1, onChange2)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundTransparency = 1
+    frame.Parent = groupbox.Content
+
+    local label1 = Instance.new("TextLabel")
+    label1.Text = text1
+    label1.Size = UDim2.new(0.3, 0, 0.5, 0)
+    label1.BackgroundTransparency = 1
+    label1.TextColor3 = Library.Config.Theme.TextColor
+    label1.Font = Enum.Font.Gotham
+    label1.TextSize = 12
+    label1.TextXAlignment = Enum.TextXAlignment.Left
+    label1.Parent = frame
+
+    local label2 = Instance.new("TextLabel")
+    label2.Text = text2
+    label2.Size = UDim2.new(0.3, 0, 0.5, 0)
+    label2.Position = UDim2.new(0.3, 0, 0.5, 0)
+    label2.BackgroundTransparency = 1
+    label2.TextColor3 = Library.Config.Theme.TextColor
+    label2.Font = Enum.Font.Gotham
+    label2.TextSize = 12
+    label2.TextXAlignment = Enum.TextXAlignment.Left
+    label2.Parent = frame
+
+    local slider1 = Library:AddSlider({Content = frame}, text1, default1, min, max, rounding, suffix1, onChange1)
+    slider1.Object = frame
+    slider1.Object.Content = frame
+    -- Adjust slider visual positions
+    local s1Obj = slider1.Object:FindFirstChild("TextButton")
+    if s1Obj then s1Obj.Size = UDim2.new(0.3, 0, 0, 6); s1Obj.Position = UDim2.new(0.3, 0, 0.25, -3) end
+
+    local slider2 = Library:AddSlider({Content = frame}, text2, default2, min, max, rounding, suffix2, onChange2)
+    slider2.Object = frame
+    slider2.Object.Content = frame
+    -- Adjust slider visual positions
+    local s2Obj = slider2.Object:FindFirstChild("TextButton")
+    if s2Obj then s2Obj.Size = UDim2.new(0.3, 0, 0, 6); s2Obj.Position = UDim2.new(0.7, 0, 0.25, -3) end
+
+    return {Slider1 = slider1, Slider2 = slider2}
+end
+
+function Library:AddDropdown(groupbox, text, values, default, onChange)
+    local dropdownFrame = Instance.new("Frame")
+    dropdownFrame.Size = UDim2.new(1, 0, 0, 24)
+    dropdownFrame.BackgroundTransparency = 1
+    dropdownFrame.Parent = groupbox.Content
+
+    local label = Instance.new("TextLabel")
+    label.Text = text
+    label.Size = UDim2.new(0.4, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Library.Config.Theme.TextColor
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = dropdownFrame
+
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0.6, 0, 0.8, 0)
+    button.Position = UDim2.new(0.4, 0, 0.1, 0)
+    button.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    button.TextColor3 = Library.Config.Theme.TextColor
+    button.Text = default or values[1] or ""
+    button.Font = Enum.Font.Gotham
+    button.TextSize = 12
+    button.TextXAlignment = Enum.TextXAlignment.Right
+    button.Parent = dropdownFrame
+
+    local list = Instance.new("ScrollingFrame")
+    list.Size = UDim2.new(0.6, 0, 0, 0)
+    list.Position = UDim2.new(0.4, 0, 1, 0)
+    list.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    list.BorderSizePixel = 1
+    list.BorderColor3 = Color3.fromRGB(50, 50, 50)
+    list.Visible = false
+    list.Parent = dropdownFrame
+    list.ClipsDescendants = true
+
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 2)
+    listLayout.Parent = list
+
+    for _, v in ipairs(values) do
+        local item = Instance.new("TextButton")
+        item.Size = UDim2.new(1, 0, 0, 16)
+        item.Text = v
+        item.BackgroundTransparency = 1
+        item.TextColor3 = Library.Config.Theme.TextColor
+        item.Font = Enum.Font.Gotham
+        item.TextSize = 11
+        item.TextXAlignment = Enum.TextXAlignment.Right
+        item.Parent = list
+        item.MouseButton1Click:Connect(function()
+            button.Text = v
+            list.Visible = false
+            if onChange then onChange(v) end
         end)
+    end
 
-        task.spawn(Library.Toggle)
-    end)
-
-    -- ── SYNC DOT WITH MENU STATE ──────────────────────────────
-    -- We watch the Window holder visibility to sync the dot
-    -- (Library.Toggle flips Outer.Visible after the fade)
-    task.spawn(function()
-        while ButtonFrame and ButtonFrame.Parent do
-            -- Find the main window frame
-            local windowVisible = false
-            for _, gui in next, CoreGui:GetChildren() do
-                if gui == Library.ScreenGui then
-                    for _, child in next, gui:GetChildren() do
-                        if child:IsA('Frame') and child.ZIndex == 1 and child.Visible then
-                            windowVisible = true
-                            break
-                        end
-                    end
-                end
-            end
-            Dot.Visible = windowVisible
-            RunService.Heartbeat:Wait()
+    local value = default or values[1] or ""
+    button.MouseButton1Click:Connect(function()
+        list.Visible = not list.Visible
+        if list.Visible then
+            list.Size = UDim2.new(0.6, 0, 0, math.min(#values * 18, 150))
         end
     end)
 
-    -- ── UPDATE ACCENT COLOR WHEN LIBRARY THEME CHANGES ───────
-    -- Poll every second since there's no event for color change
-    task.spawn(function()
-        while ButtonFrame and ButtonFrame.Parent do
-            if Library.AccentColor ~= AccentColor then
-                AccentColor     = Library.AccentColor
-                AccentColorDark = Library:GetDarkerColor(AccentColor)
-                ButtonFrame.BackgroundColor3 = AccentColor
-                Grad.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, AccentColor),
-                    ColorSequenceKeypoint.new(1, AccentColorDark),
-                })
-            end
-            task.wait(1)
+    return {
+        Set = function(val) button.Text = val; value = val; end,
+        Get = function() return value end
+    }
+end
+
+function Library:AddButton(groupbox, text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 20)
+    btn.Text = text
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    btn.TextColor3 = Library.Config.Theme.TextColor
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 12
+    btn.Parent = groupbox.Content
+
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+function Library:AddInput(groupbox, placeholder, callback)
+    local input = Instance.new("TextBox")
+    input.Size = UDim2.new(1, 0, 0, 20)
+    input.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    input.TextColor3 = Library.Config.Theme.TextColor
+    input.PlaceholderText = placeholder
+    input.Font = Enum.Font.Gotham
+    input.TextSize = 12
+    input.Parent = groupbox.Content
+
+    input.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            callback(input.Text)
+        end
+    end)
+    return input
+end
+
+-- ============================================================
+--  CONFIG SYSTEM
+-- ============================================================
+
+function Library:SetupConfigSystem()
+    local configTab = self:AddTab(self._window, "Settings")
+    local configGroup = self:AddGroupbox(configTab, "Configuration")
+    
+    local colorGroup = self:AddGroupbox(configTab, "Theme Color")
+    local colorPicker = self:AddColorPicker(colorGroup, "Accent Color", self.Config.Theme.AccentColor, function(col)
+        self.Config.Theme.AccentColor = col
+    end)
+    
+    self:AddButton(configGroup, "Save Config", function()
+        local data = self.Config
+        local json = HttpService:JSONEncode(data)
+        if writefile then
+            writefile("instance_config.json", json)
+            print("Config Saved!")
+        else
+            warn("No writefile access")
         end
     end)
 
-    MobileToggle.Button = ButtonFrame
-    MobileToggle.Shadow = Shadow
-    MobileToggle.Gui    = ButtonGui
+    local pasteInput = self:AddInput(configGroup, "Paste Config JSON here", function(text)
+        local success, decoded = pcall(HttpService.JSONDecode, HttpService, text)
+        if success and decoded then
+            self.Config = decoded
+            print("Config Pasted & Applied!")
+        else
+            print("Invalid JSON")
+        end
+    end)
 
-    return MobileToggle
+    self:AddToggle(configGroup, "Auto Load Config", self.Config.AutoLoad, function(val)
+        self.Config.AutoLoad = val
+    end)
+
+    if self.Config.AutoLoad and isfile and isfile("instance_config.json") then
+        local success, data = pcall(readfile, "instance_config.json")
+        if success then
+            local decoded = HttpService:JSONDecode(data)
+            if decoded then
+                self.Config = decoded
+                print("Auto Loaded Config")
+            end
+        end
+    end
 end
 
--- Hide or show the button
-function MobileToggle:SetVisible(Bool)
-    if ButtonFrame then ButtonFrame.Visible = Bool end
-    if Shadow      then Shadow.Visible      = Bool end
+-- ============================================================
+--  VISUAL FEATURES INTEGRATION
+-- ============================================================
+
+function Library:SetupVisuals()
+    local visualsTab = self:AddTab(self._window, "Visuals")
+
+    -- Left: ESP
+    local espGroup = self:AddGroupbox(visualsTab, "ESP")
+
+    self:AddToggle(espGroup, "Master Enable", self.Config.Box.MasterEnabled, function(val)
+        self.Config.Box.MasterEnabled = val
+    end)
+
+    local boxGroup = self:AddGroupbox(visualsTab, "Boxes")
+    self:AddToggle(boxGroup, "Boxes", self.Config.Box.Enable, function(val)
+        self.Config.Box.Enable = val
+    end)
+    self:AddColorPicker(boxGroup, "Outline Color", self.Config.Box.OutlineColor, function(col)
+        self.Config.Box.OutlineColor = col
+    end)
+
+    self:AddToggle(boxGroup, "Box Fill", self.Config.Box.Filled.Enable, function(val)
+        self.Config.Box.Filled.Enable = val
+    end)
+    self:AddColorPicker(boxGroup, "Fill Start", self.Config.Box.Filled.ColorStart, function(col)
+        self.Config.Box.Filled.ColorStart = col
+    end)
+    self:AddColorPicker(boxGroup, "Fill End", self.Config.Box.Filled.ColorEnd, function(col)
+        self.Config.Box.Filled.ColorEnd = col
+    end)
+    self:AddToggle(boxGroup, "Fill Animated", self.Config.Box.Filled.Animated, function(val)
+        self.Config.Box.Filled.Animated = val
+    end)
+    self:AddSlider(boxGroup, "Fill Transparency", self.Config.Box.Filled.Transparency, 0, 1, 0.01, "", function(val)
+        self.Config.Box.Filled.Transparency = val
+    end)
+    self:AddSlider(boxGroup, "Fill Rotation", self.Config.Box.Filled.Rotation, 0, 360, 1, "°", function(val)
+        self.Config.Box.Filled.Rotation = val
+    end)
+    self:AddSlider(boxGroup, "Fill Speed", self.Config.Box.Filled.Speed, 0.1, 10, 0.1, "", function(val)
+        self.Config.Box.Filled.Speed = val
+    end)
+
+    self:AddToggle(boxGroup, "Box Glow", self.Config.Box.Glow.Enable, function(val)
+        self.Config.Box.Glow.Enable = val
+    end)
+    self:AddColorPicker(boxGroup, "Glow Start", self.Config.Box.Glow.ColorStart, function(col)
+        self.Config.Box.Glow.ColorStart = col
+    end)
+    self:AddColorPicker(boxGroup, "Glow End", self.Config.Box.Glow.ColorEnd, function(col)
+        self.Config.Box.Glow.ColorEnd = col
+    end)
+    self:AddSlider(boxGroup, "Glow Transparency", self.Config.Box.Glow.Transparency, 0, 1, 0.01, "", function(val)
+        self.Config.Box.Glow.Transparency = val
+    end)
+    self:AddSlider(boxGroup, "Glow Rotation", self.Config.Box.Glow.Rotation, 0, 360, 1, "°", function(val)
+        self.Config.Box.Glow.Rotation = val
+    end)
+
+    self:AddToggle(boxGroup, "Healthbar", self.Config.Box.Healthbar.Enable, function(val)
+        self.Config.Box.Healthbar.Enable = val
+    end)
+    self:AddColorPicker(boxGroup, "Health High", self.Config.Box.HealthLerpColors.Color1, function(col)
+        self.Config.Box.HealthLerpColors.Color1 = col
+    end)
+    self:AddColorPicker(boxGroup, "Health Mid", self.Config.Box.HealthLerpColors.Color2, function(col)
+        self.Config.Box.HealthLerpColors.Color2 = col
+    end)
+    self:AddColorPicker(boxGroup, "Health Low", self.Config.Box.HealthLerpColors.Color3, function(col)
+        self.Config.Box.HealthLerpColors.Color3 = col
+    end)
+
+    local textGroup = self:AddGroupbox(visualsTab, "Text ESP")
+    self:AddToggle(textGroup, "Names", self.Config.TextESP.Names, function(val)
+        self.Config.TextESP.Names = val
+    end)
+    self:AddColorPicker(textGroup, "Name Color", self.Config.TextESP.NameColor, function(col)
+        self.Config.TextESP.NameColor = col
+    end)
+    self:AddToggle(textGroup, "Distance", self.Config.TextESP.Distance, function(val)
+        self.Config.TextESP.Distance = val
+    end)
+    self:AddColorPicker(textGroup, "Distance Color", self.Config.TextESP.DistanceColor, function(col)
+        self.Config.TextESP.DistanceColor = col
+    end)
+    self:AddToggle(textGroup, "Tools", self.Config.TextESP.Tools, function(val)
+        self.Config.TextESP.Tools = val
+    end)
+    self:AddColorPicker(textGroup, "Tools Color", self.Config.TextESP.ToolColor, function(col)
+        self.Config.TextESP.ToolColor = col
+    end)
+    self:AddSlider(textGroup, "Name Size", self.Config.TextESP.NameSize, 6, 20, 1, "", function(val)
+        self.Config.TextESP.NameSize = val
+    end)
+    self:AddSlider(textGroup, "Distance Size", self.Config.TextESP.DistanceSize, 6, 20, 1, "", function(val)
+        self.Config.TextESP.DistanceSize = val
+    end)
+    self:AddSlider(textGroup, "Tools Size", self.Config.TextESP.ToolsSize, 6, 20, 1, "", function(val)
+        self.Config.TextESP.ToolsSize = val
+    end)
+
+    local miscGroup = self:AddGroupbox(visualsTab, "Misc ESP")
+    self:AddToggle(miscGroup, "Skeleton", self.Config.Skeleton.Enable, function(val)
+        self.Config.Skeleton.Enable = val
+    end)
+    self:AddColorPicker(miscGroup, "Skeleton Color", self.Config.Skeleton.Color, function(col)
+        self.Config.Skeleton.Color = col
+    end)
+    self:AddSlider(miscGroup, "Skeleton Thickness", self.Config.Skeleton.Thickness, 0.5, 5, 0.5, "", function(val)
+        self.Config.Skeleton.Thickness = val
+    end)
+
+    self:AddToggle(miscGroup, "Tracers", self.Config.Tracers.Enable, function(val)
+        self.Config.Tracers.Enable = val
+    end)
+    self:AddColorPicker(miscGroup, "Tracer Color", self.Config.Tracers.Color, function(col)
+        self.Config.Tracers.Color = col
+    end)
+    self:AddSlider(miscGroup, "Tracer Thickness", self.Config.Tracers.Thickness, 0.5, 5, 0.5, "", function(val)
+        self.Config.Tracers.Thickness = val
+    end)
+
+    self:AddToggle(miscGroup, "Chams", self.Config.Chams.Enable, function(val)
+        self.Config.Chams.Enable = val
+    end)
+    self:AddColorPicker(miscGroup, "Chams Color", self.Config.Chams.Color, function(col)
+        self.Config.Chams.Color = col
+    end)
+    self:AddSlider(miscGroup, "Chams Transparency", self.Config.Chams.Transparency, 0, 1, 0.01, "", function(val)
+        self.Config.Chams.Transparency = val
+    end)
+
+    -- Right: Utility ESP
+    local utilGroup = self:AddGroupbox(visualsTab, "Utility ESP")
+    self:AddToggle(utilGroup, "Enable", self.Config.Utility.Enable, function(val)
+        self.Config.Utility.Enable = val
+    end)
+    self:AddColorPicker(utilGroup, "Text Color", self.Config.Utility.Color, function(col)
+        self.Config.Utility.Color = col
+    end)
+    self:AddToggle(utilGroup, "Distance", self.Config.Utility.Distance, function(val)
+        self.Config.Utility.Distance = val
+    end)
+    self:AddLabel(utilGroup, "Select utilities to highlight:")
+    -- Note: Multi-select is not fully implemented, but here is a basic dropdown
+    self:AddDropdown(utilGroup, "Utility Type", {"grenade","subspace tripmine","flashbang","satchel","warpstone","molotov","smoke grenade"}, "grenade", function(val)
+        self.Config.Utility.Selected = {[val]=true}
+    end)
+
+    -- Right: Lighting
+    local lightingGroup = self:AddGroupbox(visualsTab, "Lighting")
+    self:AddToggle(lightingGroup, "Lighting Master", self.Config.Lighting.Enabled, function(val)
+        self.Config.Lighting.Enabled = val
+    end)
+    self:AddToggle(lightingGroup, "Custom Ambient", self.Config.Lighting.Ambient.Enabled, function(val)
+        self.Config.Lighting.Ambient.Enabled = val
+    end)
+    self:AddColorPicker(lightingGroup, "Ambient Color", self.Config.Lighting.Ambient.Color, function(col)
+        self.Config.Lighting.Ambient.Color = col
+    end)
+
+    self:AddToggle(lightingGroup, "Custom Outdoor Ambient", self.Config.Lighting.OutdoorAmbient.Enabled, function(val)
+        self.Config.Lighting.OutdoorAmbient.Enabled = val
+    end)
+    self:AddColorPicker(lightingGroup, "Outdoor Ambient", self.Config.Lighting.OutdoorAmbient.Color, function(col)
+        self.Config.Lighting.OutdoorAmbient.Color = col
+    end)
+
+    self:AddToggle(lightingGroup, "Custom Sun Color", self.Config.Lighting.SunColor.Enabled, function(val)
+        self.Config.Lighting.SunColor.Enabled = val
+    end)
+    self:AddColorPicker(lightingGroup, "Sun Color", self.Config.Lighting.SunColor.Color, function(col)
+        self.Config.Lighting.SunColor.Color = col
+    end)
+
+    self:AddToggle(lightingGroup, "Custom Brightness", self.Config.Lighting.Brightness.Enabled, function(val)
+        self.Config.Lighting.Brightness.Enabled = val
+    end)
+    self:AddSlider(lightingGroup, "Brightness", self.Config.Lighting.Brightness.Value, 0, 10, 0.1, "", function(val)
+        self.Config.Lighting.Brightness.Value = val
+    end)
+
+    self:AddToggle(lightingGroup, "Global Shadows", self.Config.Lighting.GlobalShadows.Enabled, function(val)
+        self.Config.Lighting.GlobalShadows.Enabled = val
+    end)
+    self:AddToggle(lightingGroup, "Shadow Softness", self.Config.Lighting.ShadowSoftness.Enabled, function(val)
+        self.Config.Lighting.ShadowSoftness.Enabled = val
+    end)
+    self:AddSlider(lightingGroup, "Shadow Softness", self.Config.Lighting.ShadowSoftness.Value, 0, 1, 0.01, "", function(val)
+        self.Config.Lighting.ShadowSoftness.Value = val
+    end)
+
+    self:AddToggle(lightingGroup, "Color Shift Top", self.Config.Lighting.ColorShiftTop.Enabled, function(val)
+        self.Config.Lighting.ColorShiftTop.Enabled = val
+    end)
+    self:AddColorPicker(lightingGroup, "Top Color", self.Config.Lighting.ColorShiftTop.Color, function(col)
+        self.Config.Lighting.ColorShiftTop.Color = col
+    end)
+
+    self:AddToggle(lightingGroup, "Color Shift Bottom", self.Config.Lighting.ColorShiftBottom.Enabled, function(val)
+        self.Config.Lighting.ColorShiftBottom.Enabled = val
+    end)
+    self:AddColorPicker(lightingGroup, "Bottom Color", self.Config.Lighting.ColorShiftBottom.Color, function(col)
+        self.Config.Lighting.ColorShiftBottom.Color = col
+    end)
+
+    self:AddToggle(lightingGroup, "Custom Time", self.Config.Lighting.ClockTime.Enabled, function(val)
+        self.Config.Lighting.ClockTime.Enabled = val
+    end)
+    self:AddSlider(lightingGroup, "Hour", self.Config.Lighting.ClockTime.Value, 0, 24, 0.5, "h", function(val)
+        self.Config.Lighting.ClockTime.Value = val
+    end)
+
+    self:AddToggle(lightingGroup, "Custom Latitude", self.Config.Lighting.GeographicLatitude.Enabled, function(val)
+        self.Config.Lighting.GeographicLatitude.Enabled = val
+    end)
+    self:AddSlider(lightingGroup, "Latitude", self.Config.Lighting.GeographicLatitude.Value, -90, 90, 0.5, "°", function(val)
+        self.Config.Lighting.GeographicLatitude.Value = val
+    end)
+
+    self:AddToggle(lightingGroup, "Custom Fog", self.Config.Lighting.Fog.Enabled, function(val)
+        self.Config.Lighting.Fog.Enabled = val
+    end)
+    self:AddColorPicker(lightingGroup, "Fog Color", self.Config.Lighting.Fog.Color, function(col)
+        self.Config.Lighting.Fog.Color = col
+    end)
+    self:AddSlider(lightingGroup, "Fog Start", self.Config.Lighting.Fog.Start, 0, 500, 1, "", function(val)
+        self.Config.Lighting.Fog.Start = val
+    end)
+    self:AddSlider(lightingGroup, "Fog End", self.Config.Lighting.Fog.End, 0, 1000, 1, "", function(val)
+        self.Config.Lighting.Fog.End = val
+    end)
+
+    self:AddToggle(lightingGroup, "Diffuse Scale", self.Config.Lighting.EnvironmentDiffuseScale.Enabled, function(val)
+        self.Config.Lighting.EnvironmentDiffuseScale.Enabled = val
+    end)
+    self:AddSlider(lightingGroup, "Diffuse", self.Config.Lighting.EnvironmentDiffuseScale.Value, 0, 2, 0.01, "", function(val)
+        self.Config.Lighting.EnvironmentDiffuseScale.Value = val
+    end)
+
+    self:AddToggle(lightingGroup, "Specular Scale", self.Config.Lighting.EnvironmentSpecularScale.Enabled, function(val)
+        self.Config.Lighting.EnvironmentSpecularScale.Enabled = val
+    end)
+    self:AddSlider(lightingGroup, "Specular", self.Config.Lighting.EnvironmentSpecularScale.Value, 0, 2, 0.01, "", function(val)
+        self.Config.Lighting.EnvironmentSpecularScale.Value = val
+    end)
+
+    -- Crosshair
+    local crosshairGroup = self:AddGroupbox(visualsTab, "Crosshair")
+    self:AddToggle(crosshairGroup, "Enable", self.Config.Crosshair.enabled, function(val)
+        self.Config.Crosshair.enabled = val
+    end)
+    self:AddColorPicker(crosshairGroup, "Color", self.Config.Crosshair.crosshair_color, function(col)
+        self.Config.Crosshair.crosshair_color = col
+    end)
+    self:AddColorPicker(crosshairGroup, "Text Color 1", self.Config.Crosshair.color1, function(col)
+        self.Config.Crosshair.color1 = col
+    end)
+    self:AddColorPicker(crosshairGroup, "Text Color 2", self.Config.Crosshair.color2, function(col)
+        self.Config.Crosshair.color2 = col
+    end)
+    self:AddColorPicker(crosshairGroup, "Text Color 3", self.Config.Crosshair.color3, function(col)
+        self.Config.Crosshair.color3 = col
+    end)
+
+    self:AddToggle(crosshairGroup, "Show Lines", self.Config.Crosshair.show_lines, function(val)
+        self.Config.Crosshair.show_lines = val
+    end)
+    self:AddToggle(crosshairGroup, "Watermark", self.Config.Crosshair.show_watermark, function(val)
+        self.Config.Crosshair.show_watermark = val
+    end)
+    self:AddToggle(crosshairGroup, "Show Ammo", self.Config.Crosshair.show_ammo, function(val)
+        self.Config.Crosshair.show_ammo = val
+    end)
+
+    self:AddDualSlider(crosshairGroup, "Spin Speed", "Rotation", 
+        self.Config.Crosshair.spin_speed, self.Config.Crosshair.gradient_rotation, 
+        0, 340, 1, "", "°",
+        function(val) self.Config.Crosshair.spin_speed = val end,
+        function(val) self.Config.Crosshair.gradient_rotation = val end
+    )
+
+    self:AddDropdown(crosshairGroup, "Crosshair Mode", {"static", "follow muzzle"}, self.Config.Crosshair.crosshair_mode, function(val)
+        self.Config.Crosshair.crosshair_mode = val
+    end)
 end
 
--- Destroy the button
-function MobileToggle:Destroy()
-    if ButtonGui then ButtonGui:Destroy() end
+-- ============================================================
+--  INITIALIZATION
+-- ============================================================
+
+function Library:Init()
+    local win = self:CreateWindow()
+    self:SetupConfigSystem()
+    self:SetupVisuals()
+
+    MobileButton.Visible = self:IsMobile()
+    MobileButton.ZIndex = 999
+
+    RunService.RenderStepped:Connect(function()
+        -- Contextual updates can go here
+    end)
 end
 
-return MobileToggle
+-- ============================================================
+--  START THE UI
+-- ============================================================
+
+Library:Init()
+
+print("Instance UI Loaded with all Visuals!")

@@ -1,8 +1,7 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║                COMPLETE UNIFIED SCRIPT v2 (ANTI-KICK)                 ║
--- ║  Loader + UI + ESP + Aimbot + Silent Aim + Triggerbot + Recoil       ║
--- ║  + Hitbox + Bot ESP + Rainbow + Full Auto + Tracers + Particles      ║
--- ║  Staggered module loading, lazy hookmetamethod, gentler loops        ║
+-- ║           COMPLETE UNIFIED SCRIPT v3 (ORIGINAL AIMBOT)                ║
+-- ║  Aimbot reverted to original single-smoothness version               ║
+-- ║  All other features + anti-kick fixes retained                       ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 
 -- ====================== LOADER ======================
@@ -173,19 +172,13 @@ task.delay(3, function()
     end)
 end)
 
--- ====================== AIMBOT CONFIG ======================
+-- ====================== AIMBOT CONFIG (ORIGINAL) ======================
 local Aimbot_Enabled = false
 local Aim_FOV = 150
-local Aim_SmoothX = 3
-local Aim_SmoothY = 3
-local Aim_SmoothZ = 3
-local Aim_JumpSmooth = 6
+local Aim_Smoothness = 3
 local Aim_Part = 'Head'
 local Aim_Visible_Check = true
-local Aim_Team_Check = false
-local Aim_DeathCheck = true
-local Aim_Prediction = false
-local Aim_ProjectileSpeed = 2000
+local Team_Check = false
 local FOV_Circle_Enabled = true
 local FOV_Circle_Color = Color3.fromRGB(255, 255, 255)
 local FOV_Circle_Transparency = 0.7
@@ -360,7 +353,7 @@ local function Get_Health(player)
     return humanoid.Health / humanoid.MaxHealth
 end
 
--- ====================== DEATH CHECK ======================
+-- ====================== DEATH CHECK (used by silent aim/triggerbot/hitbox) ======================
 local function IsAlive(player)
     if not player then return false end
     resolve_player(player)
@@ -371,7 +364,7 @@ local function IsAlive(player)
     return humanoid.Health > 0
 end
 
--- ====================== AIM PREDICTION ======================
+-- ====================== AIM PREDICTION (used by silent aim) ======================
 local function GetPredictedPosition(targetPart, projectileSpeed)
     if not targetPart then return nil end
     local localChar = LocalPlayer.Character
@@ -514,7 +507,7 @@ local function Cleanup_ESP()
     end
 end
 
--- ====================== AIMBOT LOGIC ======================
+-- ====================== AIMBOT LOGIC (ORIGINAL) ======================
 local function Get_Closest_Target()
     local closest_player = nil
     local closest_distance = Aim_FOV
@@ -522,8 +515,7 @@ local function Get_Closest_Target()
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
-        if Aim_Team_Check and player.Team == LocalPlayer.Team then continue end
-        if Aim_DeathCheck and not IsAlive(player) then continue end
+        if Team_Check and player.Team == LocalPlayer.Team then continue end
         resolve_player(player)
         local char = player.Character
         if not char then continue end
@@ -541,6 +533,7 @@ local function Get_Closest_Target()
     return closest_player
 end
 
+-- Aim using CameraHandler.currentRotation (works with custom camera + mobile)
 local function Aim_At_Target(player)
     if not player then return end
     local char = player.Character
@@ -550,13 +543,9 @@ local function Aim_At_Target(player)
     if not CameraHandler or not CameraHandler.currentRotation then return end
 
     local targetPos = target_part.Position
-    if Aim_Prediction then
-        targetPos = GetPredictedPosition(target_part, Aim_ProjectileSpeed) or targetPos
-    end
-
     local camPos = Camera.CFrame.Position
     local targetCF = CFrame.lookAt(camPos, targetPos)
-    local targetPitch, targetYaw, targetRoll = targetCF:ToEulerAnglesYXZ()
+    local targetPitch, targetYaw, _ = targetCF:ToEulerAnglesYXZ()
 
     local maxPitch = CameraHandler.maxPitch or 1.5673
     targetPitch = math.clamp(targetPitch, -maxPitch, maxPitch)
@@ -564,8 +553,8 @@ local function Aim_At_Target(player)
     local currentRot = CameraHandler.currentRotation
     local currentPitch = currentRot.X
     local currentYaw = currentRot.Y
-    local currentRoll = currentRot.Z
 
+    -- Yaw wraparound
     local deltaYaw = targetYaw - currentYaw
     if deltaYaw > math.pi then
         deltaYaw = deltaYaw - 2 * math.pi
@@ -573,22 +562,13 @@ local function Aim_At_Target(player)
         deltaYaw = deltaYaw + 2 * math.pi
     end
 
-    local deltaPitch = targetPitch - currentPitch
-    local deltaRoll = targetRoll - currentRoll
+    local alpha = math.clamp(1 / Aim_Smoothness, 0.01, 1)
 
-    local targetVel = target_part.AssemblyLinearVelocity
-    local isJumping = math.abs(targetVel.Y) > 5
-
-    local alphaYaw = math.clamp(1 / Aim_SmoothX, 0.01, 1)
-    local alphaPitch = math.clamp(1 / (isJumping and Aim_JumpSmooth or Aim_SmoothY), 0.01, 1)
-    local alphaRoll = math.clamp(1 / Aim_SmoothZ, 0.01, 1)
-
-    local newPitch = currentPitch + deltaPitch * alphaPitch
-    local newYaw = currentYaw + deltaYaw * alphaYaw
-    local newRoll = currentRoll + deltaRoll * alphaRoll
+    local newPitch = currentPitch + (targetPitch - currentPitch) * alpha
+    local newYaw = currentYaw + deltaYaw * alpha
 
     newPitch = math.clamp(newPitch, -maxPitch, maxPitch)
-    CameraHandler.currentRotation = Vector3.new(newPitch, newYaw, newRoll)
+    CameraHandler.currentRotation = Vector3.new(newPitch, newYaw, 0)
 end
 
 -- ====================== ESP UPDATE ======================
@@ -598,7 +578,7 @@ local function Update_ESP()
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
-        if Aim_Team_Check and player.Team == LocalPlayer.Team then continue end
+        if Team_Check and player.Team == LocalPlayer.Team then continue end
         resolve_player(player)
         local char = player.Character
         if not char then
@@ -645,6 +625,7 @@ local function Update_ESP()
         local box_x = root_pos.X - width / 2
         local box_y = head_pos.Y - head_size
 
+        -- Box
         if Box_Enabled and ESP_Enabled then
             d.Box_Outline.Position = v2_new(box_x, box_y)
             d.Box_Outline.Size = v2_new(width, height)
@@ -659,6 +640,7 @@ local function Update_ESP()
             d.Box_Fill.Visible = false
         end
 
+        -- Health
         if Health_Enabled and ESP_Enabled then
             local bar_x = box_x - 6
             d.Health_Bar_BG.From = v2_new(bar_x, box_y)
@@ -679,6 +661,7 @@ local function Update_ESP()
             d.Health_Bar.Visible = false
         end
 
+        -- Name
         if Name_Enabled and ESP_Enabled then
             d.Name_Text.Text = player.DisplayName
             d.Name_Text.Position = v2_new(root_pos.X, box_y - 14)
@@ -688,6 +671,7 @@ local function Update_ESP()
             d.Name_Text.Visible = false
         end
 
+        -- Distance
         if Distance_Enabled and ESP_Enabled then
             d.Distance_Text.Text = dist_str
             d.Distance_Text.Position = v2_new(root_pos.X, box_y + height + 4)
@@ -696,6 +680,7 @@ local function Update_ESP()
             d.Distance_Text.Visible = false
         end
 
+        -- Tracer
         if Tracer_Enabled and ESP_Enabled then
             local origin_x = screen_size.X / 2
             local origin_y = Tracer_Origin == 'Bottom' and screen_size.Y
@@ -710,6 +695,7 @@ local function Update_ESP()
             d.Tracer_Line.Visible = false
         end
 
+        -- Head Dot
         if Head_Dot_Enabled and ESP_Enabled then
             d.Head_Dot.Position = head_pos
             d.Head_Dot.Visible = true
@@ -1176,7 +1162,7 @@ end)
 do
     local CombatTab = Tabs.Combat
 
-    -- AIMBOT
+    -- AIMBOT (ORIGINAL)
     local AimBox = CombatTab:AddLeftGroupbox('Aimbot')
 
     AimBox:AddToggle('Aimbot_Enabled', {
@@ -1196,26 +1182,13 @@ do
         Callback = function(Value) Aim_FOV = Value end
     })
 
-    AimBox:AddSlider('Aim_SmoothX', {
-        Text = 'Smoothness X (Yaw)',
-        Default = 3, Min = 1, Max = 20, Rounding = 1,
-        Callback = function(v) Aim_SmoothX = v end
-    })
-    AimBox:AddSlider('Aim_SmoothY', {
-        Text = 'Smoothness Y (Pitch)',
-        Default = 3, Min = 1, Max = 20, Rounding = 1,
-        Callback = function(v) Aim_SmoothY = v end
-    })
-    AimBox:AddSlider('Aim_SmoothZ', {
-        Text = 'Smoothness Z (Roll)',
-        Default = 3, Min = 1, Max = 20, Rounding = 1,
-        Callback = function(v) Aim_SmoothZ = v end
-    })
-    AimBox:AddSlider('Aim_JumpSmooth', {
-        Text = 'Jump Smoothness',
-        Default = 6, Min = 1, Max = 20, Rounding = 1,
-        Tooltip = 'Extra pitch smoothing when target is airborne',
-        Callback = function(v) Aim_JumpSmooth = v end
+    AimBox:AddSlider('Aim_Smoothness', {
+        Text = 'Smoothness',
+        Default = 3,
+        Min = 1,
+        Max = 20,
+        Rounding = 1,
+        Callback = function(Value) Aim_Smoothness = Value end
     })
 
     AimBox:AddDropdown('Aim_Part', {
@@ -1223,26 +1196,6 @@ do
         Default = 'Head',
         Values = { 'Head', 'HumanoidRootPart', 'Torso', 'Random' },
         Callback = function(Value) Aim_Part = Value end
-    })
-
-    AimBox:AddToggle('Aim_DeathCheck', {
-        Text = 'Death Check',
-        Default = true,
-        Callback = function(v) Aim_DeathCheck = v end
-    })
-
-    AimBox:AddToggle('Aim_Prediction', {
-        Text = 'Aim Prediction',
-        Default = false,
-        Tooltip = 'Leads target based on velocity',
-        Callback = function(v) Aim_Prediction = v end
-    })
-
-    AimBox:AddSlider('Aim_ProjSpeed', {
-        Text = 'Projectile Speed',
-        Default = 2000, Min = 100, Max = 10000, Rounding = 0,
-        Tooltip = 'Higher = less lead, lower = more lead',
-        Callback = function(v) Aim_ProjectileSpeed = v end
     })
 
     -- CHECKS
@@ -1259,7 +1212,7 @@ do
         Text = 'Team Check',
         Default = false,
         Tooltip = 'Ignore teammates',
-        Callback = function(Value) Aim_Team_Check = Value end
+        Callback = function(Value) Team_Check = Value end
     })
 
     CheckBox:AddDivider()
@@ -1752,7 +1705,7 @@ AdvancedBox:AddButton({ Text = 'Top Right', Func = function() Library:SnapWindow
 AdvancedBox:AddButton({ Text = 'Bottom Left', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'BottomLeft') end })
 AdvancedBox:AddButton({ Text = 'Bottom Right', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'BottomRight') end })
 AdvancedBox:AddButton({ Text = 'Center', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'Center') end })
-AdvancedBox:AddToggle('HapticsToggle', { Text: 'Haptic feedback', Default = false, Tooltip = 'Best-effort; only works with a connected gamepad', Callback = function(Value) Library:SetHapticsEnabled(Value) end })
+AdvancedBox:AddToggle('HapticsToggle', { Text = 'Haptic feedback', Default = false, Tooltip = 'Best-effort; only works with a connected gamepad', Callback = function(Value) Library:SetHapticsEnabled(Value) end })
 AdvancedBox:AddToggle('CompactModeToggle', { Text = 'Compact mode', Default = false, Tooltip = 'Tighter spacing -- takes effect on newly opened tabs', Callback = function(Value) Library:SetCompactMode(Value) end })
 AdvancedBox:AddToggle('SoundToggle', { Text = 'Click sound effects', Default = false, Callback = function(Value) Library:SetSoundEnabled(Value) end })
 AdvancedBox:AddSlider('SoundVolumeSlider', { Text = 'Click sound volume', Default = 40, Min = 0, Max = 100, Rounding = 0, Suffix = '%', Callback = function(Value) Library:SetSoundVolume(Value / 100) end })

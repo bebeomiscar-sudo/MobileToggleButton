@@ -1,8 +1,9 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║         COMPLETE UNIFIED SCRIPT v4 (HOOKFUNCTION + EVENT)             ║
--- ║  Silent Aim: hookfunction on ShotRemote.FireServer (no namecall)     ║
--- ║  Bullet Tracers: ShotRemote.OnClientEvent listener                   ║
--- ║  Wall checks: Utils:raycast                                          ║
+-- ║              COMPLETE UNIFIED SCRIPT v5 (GAME INTERNAL)               ║
+-- ║  Features: Aimbot+DeathCheck, ESP+TeamColors+MatchAware+Spectate,    ║
+-- ║  SilentAim(Utils), Triggerbot, NoRecoil, BotESP, Rainbow,            ║
+-- ║  CustomKillFeed, DeviceChanger                                       ║
+-- ║  Removed: BulletTracers, FullAuto, HitboxExpander (broken)           ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 
 -- ====================== LOADER ======================
@@ -57,6 +58,7 @@ local Window = Library:CreateWindow({
 local Tabs = {
     Combat = Window:AddTab('Combat'),
     Visual = Window:AddTab('Visual'),
+    Misc = Window:AddTab('Misc'),
     ['UI Settings'] = Window:AddTab('Settings'),
 }
 
@@ -104,51 +106,28 @@ task.spawn(function()
     end
 end)
 
--- ====================== CAMERA HANDLER (DELAYED) ======================
+-- ====================== GAME MODULES (STAGGERED) ======================
 local CameraHandler = nil
-task.delay(2.5, function()
-    pcall(function()
-        CameraHandler = require(RepStorage.Modules.Handlers.CameraHandler)
-    end)
-end)
-
--- ====================== NEURON (STAGGERED) ======================
 local Neuron = nil
-local AutoShootReady = false
-local FirePacket = nil
-
-task.delay(2, function()
-    pcall(function()
-        Neuron = require(RepFirst:WaitForChild('neuron'))
-    end)
-    pcall(function()
-        if Neuron and Neuron.net and Neuron.net.packets then
-            local candidates = { 'shoot', 'fire', 'weapon_fire', 'gun_fire', 'attack' }
-            for _, name in ipairs(candidates) do
-                if Neuron.net.packets[name] then
-                    FirePacket = Neuron.net.packets[name]
-                    break
-                end
-            end
-        end
-    end)
-end)
-
--- ====================== DUMMY CLIENT (DELAYED) ======================
-local DummyClient = nil
-task.delay(3.5, function()
-    pcall(function()
-        DummyClient = require(RepStorage:WaitForChild('Modules'):WaitForChild('DummyClient'))
-    end)
-end)
-
--- ====================== GAME MODULE LOADING (STAGGERED) ======================
 local Utils = nil
 local VFXUtility = nil
 local WeaponECS = nil
 local TableUtils = nil
 local ShotRemote = nil
 local WeaponSystems = {}
+local GameplayHandler = nil
+local HitHandler = nil
+local States = nil
+local DataHandler = nil
+local DummyClient = nil
+
+task.delay(2, function()
+    pcall(function() Neuron = require(RepFirst:WaitForChild('neuron')) end)
+end)
+
+task.delay(2.5, function()
+    pcall(function() CameraHandler = require(RepStorage.Modules.Handlers.CameraHandler) end)
+end)
 
 task.delay(3, function()
     pcall(function() Utils = require(RepStorage:WaitForChild('Modules'):WaitForChild('Utils')) end)
@@ -165,27 +144,39 @@ task.delay(3, function()
         local ecsFolder = RepStorage:WaitForChild('Modules'):WaitForChild('WeaponECS')
         local systemsFolder = ecsFolder:WaitForChild('Systems')
         for _, sys in ipairs(systemsFolder:GetChildren()) do
-            pcall(function()
-                WeaponSystems[sys.Name] = require(sys)
-            end)
+            pcall(function() WeaponSystems[sys.Name] = require(sys) end)
             task.wait(0.1)
         end
     end)
 end)
 
--- ====================== AIMBOT CONFIG (ORIGINAL) ======================
+task.delay(3.5, function()
+    pcall(function() GameplayHandler = require(RepStorage:WaitForChild('Modules'):WaitForChild('Handlers'):WaitForChild('GameplayHandler')) end)
+    task.wait(0.3)
+    pcall(function() HitHandler = require(RepStorage:WaitForChild('Modules'):WaitForChild('HitHandler')) end)
+    task.wait(0.3)
+    pcall(function() States = require(RepStorage:WaitForChild('Modules'):WaitForChild('States')) end)
+    task.wait(0.3)
+    pcall(function() DataHandler = require(RepStorage:WaitForChild('Modules'):WaitForChild('Handlers'):WaitForChild('DataHandler')) end)
+    task.wait(0.3)
+    pcall(function() DummyClient = require(RepStorage:WaitForChild('Modules'):WaitForChild('DummyClient')) end)
+end)
+
+-- ====================== CONFIG ======================
+-- AIMBOT
 local Aimbot_Enabled = false
 local Aim_FOV = 150
 local Aim_Smoothness = 3
 local Aim_Part = 'Head'
 local Aim_Visible_Check = true
 local Team_Check = false
+local Aim_DeathCheck = true
 local FOV_Circle_Enabled = true
 local FOV_Circle_Color = Color3.fromRGB(255, 255, 255)
 local FOV_Circle_Transparency = 0.7
 local FOV_FillStyle = 'Outline'
 
--- ====================== ESP CONFIG ======================
+-- ESP
 local ESP_Enabled = true
 local Box_Enabled = true
 local Box_Color = Color3.fromRGB(255, 255, 255)
@@ -198,8 +189,11 @@ local Tracer_Color = Color3.fromRGB(255, 255, 255)
 local Tracer_Origin = 'Bottom'
 local Head_Dot_Enabled = true
 local Head_Dot_Color = Color3.fromRGB(255, 0, 0)
+local ESP_TeamColors = false
+local ESP_MatchAware = false
+local ESP_SpectateDetect = false
 
--- ====================== TRIGGERBOT CONFIG ======================
+-- TRIGGERBOT
 local TB_Enabled = false
 local TB_FOV = 60
 local TB_Delay = 0.05
@@ -208,7 +202,7 @@ local TB_VisibleCheck = true
 local TB_TargetPart = 'Torso'
 local TB_DeathCheck = true
 
--- ====================== SILENT AIM CONFIG ======================
+-- SILENT AIM
 local SA_Enabled = false
 local SA_FOV = 300
 local SA_TargetPart = 'Head'
@@ -220,7 +214,7 @@ local SA_ProjectileSpeed = 2000
 local SA_Hooked = false
 local SA_HookMethod = 'None'
 
--- ====================== NO RECOIL CONFIG ======================
+-- NO RECOIL
 local NR_Enabled = false
 local NR_PitchLock = true
 local NR_YawLock = false
@@ -241,43 +235,28 @@ UserInput.InputEnded:Connect(function(input)
     end
 end)
 
--- ====================== HITBOX CONFIG ======================
-local HB_Enabled = false
-local HB_Size = 5
-local HB_Part = 'HumanoidRootPart'
-local HB_Transparency = 0.5
-local HB_TeamCheck = true
-local HB_DeathCheck = true
-local HB_OriginalSizes = {}
-
--- ====================== BOT ESP CONFIG ======================
+-- BOT ESP
 local BotESP_Enabled = false
 local BotESP_Color = Color3.fromRGB(0, 255, 140)
 local BotESP_FinisherColor = Color3.fromRGB(255, 50, 150)
 local BotESP_ShowID = false
 local BotESP_Pool = {}
 
--- ====================== RAINBOW CONFIG ======================
+-- RAINBOW
 local Rainbow_Enabled = false
 local Rainbow_Hue = 0
 local Rainbow_Speed = 0.003
 local Rainbow_Targets = { 'Box', 'Name', 'Tracer', 'HeadDot', 'FOV' }
 
--- ====================== FULL AUTO CONFIG ======================
-local FA_Enabled = false
-local FA_Speed = 0.05
-local FA_LastFire = 0
+-- CUSTOM KILL FEED
+local KF_Enabled = false
+local KF_MaxEntries = 5
+local KF_Duration = 5
+local KF_Pool = {}
 
--- ====================== BULLET TRACER CONFIG ======================
-local BT_Enabled = false
-local BT_Color = Color3.fromRGB(255, 220, 0)
-local BT_Duration = 0.4
-local BT_Thickness = 1.5
-local BT_Pool = {}
-local BT_ListenerSetup = false
-
--- ====================== PARTICLE CONTROL CONFIG ======================
-local PC_Enabled = false
+-- DEVICE CHANGER
+local DC_Enabled = false
+local DC_Device = '1'
 
 -- ====================== DRAWING HELPERS ======================
 local v2_new = Vector2.new
@@ -290,6 +269,104 @@ local function World_To_Screen(position)
     return v2_new(point.X, point.Y), on_screen, point.Z
 end
 
+-- ====================== DEATH CHECK (HitHandler + States) ======================
+local function IsAlive(player)
+    if not player then return false end
+    resolve_player(player)
+    local char = player.Character
+    if not char then return false end
+
+    if HitHandler and HitHandler.isAlive then
+        local ok, result = pcall(function() return HitHandler:isAlive(char) end)
+        if ok then return result end
+    end
+
+    if States and States.GetStateValue then
+        local ok, health = pcall(function() return States:GetStateValue(char, "Health", 150) end)
+        if ok and health then return health > 0 end
+    end
+
+    local humanoid = char:FindFirstChildOfClass('Humanoid')
+    if not humanoid then return false end
+    return humanoid.Health > 0
+end
+
+-- ====================== AIM PREDICTION ======================
+local function GetPredictedPosition(targetPart, projectileSpeed)
+    if not targetPart then return nil end
+    local localChar = LocalPlayer.Character
+    if not localChar then return targetPart.Position end
+    local localRoot = localChar:FindFirstChild('HumanoidRootPart')
+    if not localRoot then return targetPart.Position end
+
+    local targetPos = targetPart.Position
+    local targetVel = targetPart.AssemblyLinearVelocity
+    local distance = (targetPos - localRoot.Position).Magnitude
+
+    if projectileSpeed <= 0 or distance <= 0 then return targetPos end
+    local timeToHit = distance / projectileSpeed
+    return targetPos + (targetVel * timeToHit)
+end
+
+-- ====================== GAMEPLAY DATA HELPERS ======================
+local function GetPlayerMatchState(player)
+    if not GameplayHandler or not GameplayHandler.PlayerGameData then return "unknown" end
+    local data = GameplayHandler.PlayerGameData[player]
+    if not data then return "unknown" end
+    if data.state == "lobby" then return "LOBBY" end
+    if data.spectating then return "SPECTATING" end
+    if data.state == "duel" then return "IN MATCH" end
+    return "unknown"
+end
+
+local function GetPlayerTeamInfo(player)
+    if not GameplayHandler then return nil end
+    local localDuel, duelID = GameplayHandler:GetLocalDuel()
+    if not localDuel then return nil end
+    local team = GameplayHandler:GetPlayerTeam(duelID, player)
+    if not team then return nil end
+    return team
+end
+
+local function IsPlayerSpectating(player)
+    if not GameplayHandler then return false end
+    local _, duelID = GameplayHandler:GetLocalDuel()
+    if not duelID then return false end
+    local duel = GameplayHandler.DuelData[duelID]
+    if not duel or not duel.spectators then return false end
+    return table.find(duel.spectators, player) ~= nil
+end
+
+local function GetTeamColor(player)
+    local team = GetPlayerTeamInfo(player)
+    if not team then return nil, false, false end
+    local color = nil
+    if team.color == "Blue" then
+        color = Color3.fromRGB(0, 154, 255)
+    elseif team.color == "Orange" then
+        color = Color3.fromRGB(255, 115, 39)
+    end
+    return color, team.ally == true, team.enemy == true
+end
+
+-- ====================== DUMMY HELPERS ======================
+local function GetDummyCount()
+    local count = 0
+    local world = Workspace:FindFirstChild('World')
+    if world then
+        local entities = world:FindFirstChild('Entities')
+        if entities then
+            for _, v in ipairs(entities:GetChildren()) do
+                if v:GetAttribute('IsDummy') == true then
+                    count = count + 1
+                end
+            end
+        end
+    end
+    return count
+end
+
+-- ====================== WALL CHECK ======================
 local function Is_Behind_Wall(part)
     if not Aim_Visible_Check then return false end
     local origin = Camera.CFrame.Position
@@ -299,27 +376,48 @@ local function Is_Behind_Wall(part)
     return hit and hit:IsDescendantOf(part.Parent) == false
 end
 
--- Wall check using Utils:raycast (the utility module)
-local function Is_Behind_Wall_Enhanced(part)
+-- ====================== SILENT AIM WALL CHECK (UTILS ONLY) ======================
+local function SA_IsVisible(targetPart)
+    if not SA_VisibleCheck then return true end
     local origin = Camera.CFrame.Position
-    local direction = (part.Position - origin)
+    local direction = (targetPart.Position - origin)
 
     if Utils and Utils.raycast then
         local params = Utils.defaultParams or RaycastParams.new()
         params.FilterDescendantsInstances = { LocalPlayer.Character }
         local result = Utils:raycast(origin, direction, params, nil, true)
         if result and result.Instance then
-            return not result.Instance:IsDescendantOf(part.Parent)
+            return result.Instance:IsDescendantOf(targetPart.Parent)
         end
-        return false
+        return true
     end
 
-    -- Fallback if Utils hasn't loaded
-    local ray = Ray.new(origin, direction)
-    local hit = Workspace:FindPartOnRayWithIgnoreList(ray, { LocalPlayer.Character }, false, true)
-    return hit and hit:IsDescendantOf(part.Parent) == false
+    return true
 end
 
+-- ====================== SILENT AIM HIT POSITION (UTILS RAYCAST) ======================
+local function GetSilentAimHitPosition(targetPart)
+    local camPos = Camera.CFrame.Position
+    local targetPos = targetPart.Position
+
+    if SA_Prediction then
+        targetPos = GetPredictedPosition(targetPart, SA_ProjectileSpeed) or targetPos
+    end
+
+    if Utils and Utils.raycast then
+        local direction = (targetPos - camPos)
+        local params = Utils.defaultParams or RaycastParams.new()
+        params.FilterDescendantsInstances = { LocalPlayer.Character }
+        local result = Utils:raycast(camPos, direction, params, nil, true)
+        if result and result.Position then
+            return result.Position
+        end
+    end
+
+    return targetPos
+end
+
+-- ====================== PART FINDER ======================
 local function Get_Nearest_Part(player, part_name)
     local char = player.Character
     if not char then return nil end
@@ -353,67 +451,23 @@ end
 local function Get_Health(player)
     local char = player.Character
     if not char then return 0 end
+
+    if States and States.GetStateValue then
+        local ok, health = pcall(function() return States:GetStateValue(char, "Health", 150) end)
+        if ok and health then
+            local maxHealth = 150
+            local ok2, mh = pcall(function() return States:GetStateValue(char, "MaxHealth", 150) end)
+            if ok2 and mh then maxHealth = mh end
+            return math.clamp(health / maxHealth, 0, 1)
+        end
+    end
+
     local humanoid = char:FindFirstChildOfClass('Humanoid')
     if not humanoid then return 0 end
     return humanoid.Health / humanoid.MaxHealth
 end
 
--- ====================== DEATH CHECK ======================
-local function IsAlive(player)
-    if not player then return false end
-    resolve_player(player)
-    local char = player.Character
-    if not char then return false end
-    local humanoid = char:FindFirstChildOfClass('Humanoid')
-    if not humanoid then return false end
-    return humanoid.Health > 0
-end
-
--- ====================== AIM PREDICTION ======================
-local function GetPredictedPosition(targetPart, projectileSpeed)
-    if not targetPart then return nil end
-    local localChar = LocalPlayer.Character
-    if not localChar then return targetPart.Position end
-    local localRoot = localChar:FindFirstChild('HumanoidRootPart')
-    if not localRoot then return targetPart.Position end
-
-    local targetPos = targetPart.Position
-    local targetVel = targetPart.AssemblyLinearVelocity
-    local distance = (targetPos - localRoot.Position).Magnitude
-
-    if projectileSpeed <= 0 or distance <= 0 then return targetPos end
-    local timeToHit = distance / projectileSpeed
-    return targetPos + (targetVel * timeToHit)
-end
-
--- ====================== DUMMY HELPERS ======================
-local function IsDummyChar(character)
-    if not character then return false end
-    return character:GetAttribute('IsDummy') == true
-end
-
-local function IsFinisherChar(character)
-    if not character then return false end
-    return character:GetAttribute('Finisher') == true
-end
-
-local function GetDummyCount()
-    local count = 0
-    local world = Workspace:FindFirstChild('World')
-    if world then
-        local entities = world:FindFirstChild('Entities')
-        if entities then
-            for _, v in ipairs(entities:GetChildren()) do
-                if v:GetAttribute('IsDummy') == true then
-                    count = count + 1
-                end
-            end
-        end
-    end
-    return count
-end
-
--- ====================== FOV CIRCLE DRAWING ======================
+-- ====================== FOV CIRCLE ======================
 local FOV_Drawing = Drawing.new('Circle')
 FOV_Drawing.Visible = false
 FOV_Drawing.Filled = false
@@ -473,6 +527,14 @@ local function Create_ESP_Drawings(player)
     d.Distance_Text.Font = Drawing.Fonts.Plex
     d.Distance_Text.ZIndex = 3
 
+    d.Status_Text = Drawing.new('Text')
+    d.Status_Text.Visible = false
+    d.Status_Text.Size = 11
+    d.Status_Text.Center = true
+    d.Status_Text.Outline = true
+    d.Status_Text.Font = Drawing.Fonts.Plex
+    d.Status_Text.ZIndex = 3
+
     d.Tracer_Line = Drawing.new('Line')
     d.Tracer_Line.Visible = false
     d.Tracer_Line.Color = Tracer_Color
@@ -512,7 +574,7 @@ local function Cleanup_ESP()
     end
 end
 
--- ====================== AIMBOT LOGIC (ORIGINAL) ======================
+-- ====================== AIMBOT LOGIC ======================
 local function Get_Closest_Target()
     local closest_player = nil
     local closest_distance = Aim_FOV
@@ -521,6 +583,7 @@ local function Get_Closest_Target()
     for _, player in ipairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
         if Team_Check and player.Team == LocalPlayer.Team then continue end
+        if Aim_DeathCheck and not IsAlive(player) then continue end
         resolve_player(player)
         local char = player.Character
         if not char then continue end
@@ -566,7 +629,6 @@ local function Aim_At_Target(player)
     end
 
     local alpha = math.clamp(1 / Aim_Smoothness, 0.01, 1)
-
     local newPitch = currentPitch + (targetPitch - currentPitch) * alpha
     local newYaw = currentYaw + deltaYaw * alpha
 
@@ -586,9 +648,7 @@ local function Update_ESP()
         local char = player.Character
         if not char then
             local d = ESP_Pool[player]
-            if d then
-                for _, drawing in pairs(d) do drawing.Visible = false end
-            end
+            if d then for _, drawing in pairs(d) do drawing.Visible = false end end
             continue
         end
 
@@ -596,9 +656,7 @@ local function Update_ESP()
         local head = char:FindFirstChild('Head')
         if not hrp or not head then
             local d = ESP_Pool[player]
-            if d then
-                for _, drawing in pairs(d) do drawing.Visible = false end
-            end
+            if d then for _, drawing in pairs(d) do drawing.Visible = false end end
             continue
         end
 
@@ -606,9 +664,7 @@ local function Update_ESP()
         local head_pos, head_visible = World_To_Screen(head.Position + v3_new(0, 0.3, 0))
 
         local d = ESP_Pool[player]
-        if not d then
-            d = Create_ESP_Drawings(player)
-        end
+        if not d then d = Create_ESP_Drawings(player) end
 
         if not root_visible and not head_visible then
             for _, drawing in pairs(d) do drawing.Visible = false end
@@ -619,10 +675,25 @@ local function Update_ESP()
         local distance = Get_Distance(player)
         local dist_str = tostring(math_floor(distance)) .. 'm'
 
+        -- Team color override
+        local effective_box_color = Box_Color
+        local effective_name_color = Name_Color
+        local effective_tracer_color = Tracer_Color
+        local effective_dot_color = Head_Dot_Color
+
+        if ESP_TeamColors then
+            local tColor, isAlly, isEnemy = GetTeamColor(player)
+            if tColor then
+                effective_box_color = tColor
+                effective_name_color = tColor
+                effective_tracer_color = tColor
+                effective_dot_color = tColor
+            end
+        end
+
         local head_size = 2
-        local root_size = 2
         local head_y = head_pos.Y - head_size
-        local root_y = root_pos.Y + root_size
+        local root_y = root_pos.Y + 2
         local height = math_abs(root_y - head_y)
         local width = height * 0.55
         local box_x = root_pos.X - width / 2
@@ -632,8 +703,7 @@ local function Update_ESP()
             d.Box_Outline.Position = v2_new(box_x, box_y)
             d.Box_Outline.Size = v2_new(width, height)
             d.Box_Outline.Visible = true
-            d.Box_Outline.Color = Box_Color
-
+            d.Box_Outline.Color = effective_box_color
             d.Box_Fill.Position = v2_new(box_x, box_y)
             d.Box_Fill.Size = v2_new(width, height)
             d.Box_Fill.Visible = true
@@ -647,13 +717,10 @@ local function Update_ESP()
             d.Health_Bar_BG.From = v2_new(bar_x, box_y)
             d.Health_Bar_BG.To = v2_new(bar_x, box_y + height)
             d.Health_Bar_BG.Visible = true
-
             local filled = height * health
-            local start_y = box_y + height - filled
-            d.Health_Bar.From = v2_new(bar_x, start_y)
+            d.Health_Bar.From = v2_new(bar_x, box_y + height - filled)
             d.Health_Bar.To = v2_new(bar_x, box_y + height)
             d.Health_Bar.Visible = true
-
             local r = (1 - health) * 255
             local g = health * 255
             d.Health_Bar.Color = Color3.fromRGB(r, g, 40)
@@ -666,7 +733,7 @@ local function Update_ESP()
             d.Name_Text.Text = player.DisplayName
             d.Name_Text.Position = v2_new(root_pos.X, box_y - 14)
             d.Name_Text.Visible = true
-            d.Name_Text.Color = Name_Color
+            d.Name_Text.Color = effective_name_color
         else
             d.Name_Text.Visible = false
         end
@@ -679,16 +746,39 @@ local function Update_ESP()
             d.Distance_Text.Visible = false
         end
 
+        -- Match-aware / Spectate status text
+        if ESP_MatchAware or ESP_SpectateDetect then
+            local status_parts = {}
+            if ESP_MatchAware then
+                local matchState = GetPlayerMatchState(player)
+                if matchState ~= "unknown" then
+                    table.insert(status_parts, matchState)
+                end
+            end
+            if ESP_SpectateDetect and IsPlayerSpectating(player) then
+                table.insert(status_parts, "SPECTATING")
+            end
+            if #status_parts > 0 then
+                d.Status_Text.Text = table.concat(status_parts, " | ")
+                d.Status_Text.Position = v2_new(root_pos.X, box_y + height + 18)
+                d.Status_Text.Color = IsPlayerSpectating(player) and Color3.fromRGB(255, 200, 0) or Color3.fromRGB(150, 150, 255)
+                d.Status_Text.Visible = true
+            else
+                d.Status_Text.Visible = false
+            end
+        else
+            d.Status_Text.Visible = false
+        end
+
         if Tracer_Enabled and ESP_Enabled then
             local origin_x = screen_size.X / 2
             local origin_y = Tracer_Origin == 'Bottom' and screen_size.Y
                 or Tracer_Origin == 'Top' and 0
                 or screen_size.Y / 2
-
             d.Tracer_Line.From = v2_new(origin_x, origin_y)
             d.Tracer_Line.To = v2_new(root_pos.X, root_pos.Y)
             d.Tracer_Line.Visible = true
-            d.Tracer_Line.Color = Tracer_Color
+            d.Tracer_Line.Color = effective_tracer_color
         else
             d.Tracer_Line.Visible = false
         end
@@ -696,7 +786,7 @@ local function Update_ESP()
         if Head_Dot_Enabled and ESP_Enabled then
             d.Head_Dot.Position = head_pos
             d.Head_Dot.Visible = true
-            d.Head_Dot.Color = Head_Dot_Color
+            d.Head_Dot.Color = effective_dot_color
         else
             d.Head_Dot.Visible = false
         end
@@ -707,9 +797,7 @@ end
 local function Update_Aimbot()
     if not Aimbot_Enabled then return end
     local target = Get_Closest_Target()
-    if target then
-        Aim_At_Target(target)
-    end
+    if target then Aim_At_Target(target) end
 end
 
 -- ====================== FOV UPDATE ======================
@@ -724,7 +812,6 @@ local function Update_FOV()
     FOV_Drawing.Color = FOV_Circle_Color
     FOV_Drawing.Thickness = 1.5
     FOV_Drawing.NumSides = 100
-
     if FOV_FillStyle == 'Outline' then
         FOV_Drawing.Filled = false
         FOV_Drawing.Transparency = FOV_Circle_Transparency
@@ -735,11 +822,10 @@ local function Update_FOV()
         FOV_Drawing.Filled = true
         FOV_Drawing.Transparency = 0.3
     end
-
     FOV_Drawing.Visible = true
 end
 
--- ====================== SILENT AIM LOGIC ======================
+-- ====================== SILENT AIM (UTILS ONLY) ======================
 local function Get_SilentAim_Target()
     local closest_player = nil
     local closest_distance = SA_FOV
@@ -754,8 +840,7 @@ local function Get_SilentAim_Target()
         if not char then continue end
         local target_part = Get_Nearest_Part(player, SA_TargetPart)
         if not target_part then continue end
-        -- Use Utils:raycast for wall check
-        if SA_VisibleCheck and Is_Behind_Wall_Enhanced(target_part) then continue end
+        if not SA_IsVisible(target_part) then continue end
         local screen_pos, on_screen = World_To_Screen(target_part.Position)
         if not on_screen then continue end
         local dist = (screen_pos - screen_center).Magnitude
@@ -768,53 +853,45 @@ local function Get_SilentAim_Target()
 end
 
 -- ====================== SHOT REMOTE HOOK (HOOKFUNCTION) ======================
--- No hookmetamethod/__namecall — uses hookfunction on ShotRemote.FireServer
--- Falls back to FireSystem function hook if hookfunction fails
 local function HookShotRemote()
     if SA_Hooked then return end
     if not ShotRemote then return end
+    if not hookfunction then return end
 
     local safeCC = newcclosure or function(f) return f end
 
-    -- Method 1: hookfunction on ShotRemote.FireServer
-    if hookfunction then
-        pcall(function()
-            local oldFire = hookfunction(ShotRemote.FireServer, safeCC(function(...)
-                local args = {...}
+    pcall(function()
+        local oldFire = hookfunction(ShotRemote.FireServer, safeCC(function(...)
+            local args = {...}
 
-                if SA_Enabled then
-                    local target = Get_SilentAim_Target()
-                    if target then
-                        local targetPart = Get_Nearest_Part(target, SA_TargetPart)
-                        if targetPart then
-                            local hitPos = targetPart.Position
-                            if SA_Prediction then
-                                hitPos = GetPredictedPosition(targetPart, SA_ProjectileSpeed) or hitPos
-                            end
+            if SA_Enabled then
+                local target = Get_SilentAim_Target()
+                if target then
+                    local targetPart = Get_Nearest_Part(target, SA_TargetPart)
+                    if targetPart then
+                        local hitPos = GetSilentAimHitPosition(targetPart)
 
-                            if type(args[2]) == "table" then
-                                if args[2].position then args[2].position = hitPos end
-                                if args[2].hitPosition then args[2].hitPosition = hitPos end
-                                if args[2].Position then args[2].Position = hitPos end
-                                if args[2].target then args[2].target = targetPart end
-                                if args[2].hitPart then args[2].hitPart = targetPart end
-                            elseif typeof(args[2]) == "Vector3" then
-                                args[2] = hitPos
-                            elseif typeof(args[3]) == "Vector3" then
-                                args[3] = hitPos
-                            end
+                        if type(args[2]) == "table" then
+                            if args[2].position then args[2].position = hitPos end
+                            if args[2].hitPosition then args[2].hitPosition = hitPos end
+                            if args[2].Position then args[2].Position = hitPos end
+                            if args[2].target then args[2].target = targetPart end
+                            if args[2].hitPart then args[2].hitPart = targetPart end
+                        elseif typeof(args[2]) == "Vector3" then
+                            args[2] = hitPos
+                        elseif typeof(args[3]) == "Vector3" then
+                            args[3] = hitPos
                         end
                     end
                 end
+            end
 
-                return oldFire(table.unpack(args))
-            end))
-            SA_Hooked = true
-            SA_HookMethod = 'hookfunction'
-        end)
-    end
+            return oldFire(table.unpack(args))
+        end))
+        SA_Hooked = true
+        SA_HookMethod = 'hookfunction'
+    end)
 
-    -- Method 2: Hook FireSystem's fire function (fallback)
     if not SA_Hooked and WeaponSystems.FireSystem then
         for k, v in pairs(WeaponSystems.FireSystem) do
             if type(v) == "function" and (k:lower():match("fire") or k:lower():match("shoot")) then
@@ -822,17 +899,12 @@ local function HookShotRemote()
                     local oldFunc = WeaponSystems.FireSystem[k]
                     WeaponSystems.FireSystem[k] = safeCC(function(...)
                         local args = {...}
-
                         if SA_Enabled then
                             local target = Get_SilentAim_Target()
                             if target then
                                 local targetPart = Get_Nearest_Part(target, SA_TargetPart)
                                 if targetPart then
-                                    local hitPos = targetPart.Position
-                                    if SA_Prediction then
-                                        hitPos = GetPredictedPosition(targetPart, SA_ProjectileSpeed) or hitPos
-                                    end
-
+                                    local hitPos = GetSilentAimHitPosition(targetPart)
                                     if type(args[2]) == "table" then
                                         if args[2].position then args[2].position = hitPos end
                                         if args[2].hitPosition then args[2].hitPosition = hitPos end
@@ -847,7 +919,6 @@ local function HookShotRemote()
                                 end
                             end
                         end
-
                         return oldFunc(table.unpack(args))
                     end)
                     SA_Hooked = true
@@ -859,166 +930,7 @@ local function HookShotRemote()
     end
 end
 
--- ====================== BULLET TRACER LISTENER (OnClientEvent) ======================
--- Listens to ShotRemote.OnClientEvent for server-broadcast shot data
--- Draws tracers based on the shot packet data
-local function SetupBulletListener()
-    if BT_ListenerSetup then return end
-    if not ShotRemote then return end
-
-    -- Try RemoteEvent listener
-    pcall(function()
-        if ShotRemote:IsA('RemoteEvent') then
-            ShotRemote.OnClientEvent:Connect(function(...)
-                if not BT_Enabled then return end
-
-                local args = {...}
-                local originPos = nil
-                local hitPos = nil
-
-                -- Parse various possible data structures
-                if type(args[1]) == "table" then
-                    originPos = args[1].origin or args[1].startPos or args[1].from or args[1].muzzle
-                    hitPos = args[1].hitPosition or args[1].hit or args[1].endPos or args[1].position or args[1].destination
-                elseif type(args[2]) == "table" then
-                    originPos = args[2].origin or args[2].startPos or args[2].from
-                    hitPos = args[2].hitPosition or args[2].hit or args[2].endPos or args[2].position
-                elseif typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
-                    originPos = args[1]
-                    hitPos = args[2]
-                elseif typeof(args[1]) == "Vector3" then
-                    hitPos = args[1]
-                elseif typeof(args[2]) == "Vector3" then
-                    hitPos = args[2]
-                end
-
-                if hitPos then
-                    local drawFrom = originPos or Camera.CFrame.Position
-                    local screenFrom, visFrom = World_To_Screen(drawFrom)
-                    local screenTo, visTo = World_To_Screen(hitPos)
-                    if visFrom and visTo then
-                        local line = Drawing.new('Line')
-                        line.Visible = true
-                        line.From = screenFrom
-                        line.To = screenTo
-                        line.Color = BT_Color
-                        line.Thickness = BT_Thickness
-                        line.Transparency = 0.2
-                        table.insert(BT_Pool, {
-                            drawing = line,
-                            expire = tick() + BT_Duration,
-                            duration = BT_Duration
-                        })
-                    end
-                end
-            end)
-            BT_ListenerSetup = true
-        end
-    end)
-
-    -- Try RemoteFunction listener
-    if not BT_ListenerSetup then
-        pcall(function()
-            if ShotRemote:IsA('RemoteFunction') then
-                local oldInvoke = ShotRemote.OnClientInvoke
-                ShotRemote.OnClientInvoke = function(...)
-                    local args = {...}
-
-                    if BT_Enabled then
-                        local originPos = nil
-                        local hitPos = nil
-
-                        if type(args[1]) == "table" then
-                            originPos = args[1].origin or args[1].startPos or args[1].from
-                            hitPos = args[1].hitPosition or args[1].hit or args[1].endPos or args[1].position
-                        elseif typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
-                            originPos = args[1]
-                            hitPos = args[2]
-                        elseif typeof(args[1]) == "Vector3" then
-                            hitPos = args[1]
-                        end
-
-                        if hitPos then
-                            local drawFrom = originPos or Camera.CFrame.Position
-                            local screenFrom, visFrom = World_To_Screen(drawFrom)
-                            local screenTo, visTo = World_To_Screen(hitPos)
-                            if visFrom and visTo then
-                                local line = Drawing.new('Line')
-                                line.Visible = true
-                                line.From = screenFrom
-                                line.To = screenTo
-                                line.Color = BT_Color
-                                line.Thickness = BT_Thickness
-                                line.Transparency = 0.2
-                                table.insert(BT_Pool, {
-                                    drawing = line,
-                                    expire = tick() + BT_Duration,
-                                    duration = BT_Duration
-                                })
-                            end
-                        end
-                    end
-
-                    if oldInvoke then
-                        return oldInvoke(...)
-                    end
-                end
-                BT_ListenerSetup = true
-            end
-        end)
-    end
-
-    -- Generic fallback — try connecting regardless of type
-    if not BT_ListenerSetup then
-        pcall(function()
-            ShotRemote.OnClientEvent:Connect(function(...)
-                if not BT_Enabled then return end
-
-                local args = {...}
-                local originPos = nil
-                local hitPos = nil
-
-                if type(args[1]) == "table" then
-                    originPos = args[1].origin or args[1].startPos or args[1].from
-                    hitPos = args[1].hitPosition or args[1].hit or args[1].endPos or args[1].position
-                elseif typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
-                    originPos = args[1]
-                    hitPos = args[2]
-                elseif typeof(args[1]) == "Vector3" then
-                    hitPos = args[1]
-                end
-
-                if hitPos then
-                    local drawFrom = originPos or Camera.CFrame.Position
-                    local screenFrom, visFrom = World_To_Screen(drawFrom)
-                    local screenTo, visTo = World_To_Screen(hitPos)
-                    if visFrom and visTo then
-                        local line = Drawing.new('Line')
-                        line.Visible = true
-                        line.From = screenFrom
-                        line.To = screenTo
-                        line.Color = BT_Color
-                        line.Thickness = BT_Thickness
-                        line.Transparency = 0.2
-                        table.insert(BT_Pool, {
-                            drawing = line,
-                            expire = tick() + BT_Duration,
-                            duration = BT_Duration
-                        })
-                    end
-                end
-            end)
-            BT_ListenerSetup = true
-        end)
-    end
-end
-
--- Setup bullet listener after ShotRemote loads
-task.delay(4, function()
-    SetupBulletListener()
-end)
-
--- ====================== TRIGGERBOT LOGIC (SAFER) ======================
+-- ====================== TRIGGERBOT ======================
 local TB_LastFire = 0
 
 local function Update_Triggerbot()
@@ -1038,7 +950,7 @@ local function Update_Triggerbot()
         if not char then continue end
         local target_part = Get_Nearest_Part(player, TB_TargetPart)
         if not target_part then continue end
-        if TB_VisibleCheck and Is_Behind_Wall_Enhanced(target_part) then continue end
+        if TB_VisibleCheck and not SA_IsVisible(target_part) then continue end
         local screen_pos, on_screen = World_To_Screen(target_part.Position)
         if not on_screen then continue end
         local dist = (screen_pos - screen_center).Magnitude
@@ -1059,7 +971,7 @@ local function Update_Triggerbot()
     end
 end
 
--- ====================== NO RECOIL LOGIC ======================
+-- ====================== NO RECOIL ======================
 local function Update_NoRecoil()
     if not NR_Enabled then
         NR_LastPitch = nil
@@ -1088,51 +1000,7 @@ local function Update_NoRecoil()
     end
 end
 
--- ====================== HITBOX EXPANDER LOGIC ======================
-local function Update_Hitbox()
-    if not HB_Enabled then
-        for player, parts in pairs(HB_OriginalSizes) do
-            if player.Parent then
-                local char = player.Character
-                if char then
-                    for partName, origSize in pairs(parts) do
-                        local part = char:FindFirstChild(partName)
-                        if part and part:IsA('BasePart') then
-                            part.Size = origSize
-                            part.Transparency = 0
-                            part.Material = Enum.Material.Plastic
-                        end
-                    end
-                end
-            end
-        end
-        HB_OriginalSizes = {}
-        return
-    end
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if HB_TeamCheck and player.Team == LocalPlayer.Team then continue end
-        if HB_DeathCheck and not IsAlive(player) then continue end
-        resolve_player(player)
-        local char = player.Character
-        if not char then continue end
-        local target = Get_Nearest_Part(player, HB_Part)
-        if not target then continue end
-
-        if not HB_OriginalSizes[player] then HB_OriginalSizes[player] = {} end
-        if not HB_OriginalSizes[player][target.Name] then
-            HB_OriginalSizes[player][target.Name] = target.Size
-        end
-
-        target.Size = Vector3.new(HB_Size, HB_Size, HB_Size)
-        target.Transparency = HB_Transparency
-        target.Color = Color3.fromRGB(255, 0, 0)
-        target.Material = Enum.Material.Neon
-    end
-end
-
--- ====================== BOT ESP LOGIC ======================
+-- ====================== BOT ESP ======================
 local function Create_Bot_Drawings()
     local d = {}
     d.Box = Drawing.new('Square')
@@ -1193,9 +1061,7 @@ local function Update_BotESP()
 
         if not root_visible and not head_visible then
             if BotESP_Pool[ent] then
-                for _, drawing in pairs(BotESP_Pool[ent]) do
-                    drawing.Visible = false
-                end
+                for _, drawing in pairs(BotESP_Pool[ent]) do drawing.Visible = false end
             end
             continue
         end
@@ -1203,9 +1069,7 @@ local function Update_BotESP()
         local isFinisher = ent:GetAttribute('Finisher') == true
         local color = isFinisher and BotESP_FinisherColor or BotESP_Color
 
-        if not BotESP_Pool[ent] then
-            BotESP_Pool[ent] = Create_Bot_Drawings()
-        end
+        if not BotESP_Pool[ent] then BotESP_Pool[ent] = Create_Bot_Drawings() end
         local d = BotESP_Pool[ent]
 
         local head_y = head_pos and head_pos.Y or (root_pos.Y - 3)
@@ -1240,7 +1104,7 @@ local function Update_BotESP()
     end
 end
 
--- ====================== RAINBOW LOGIC ======================
+-- ====================== RAINBOW ======================
 local function Update_Rainbow()
     if not Rainbow_Enabled then return end
     Rainbow_Hue = (Rainbow_Hue + Rainbow_Speed) % 1
@@ -1255,53 +1119,181 @@ local function Update_Rainbow()
     end
 end
 
--- ====================== FULL AUTO LOGIC ======================
-local function Update_FullAuto()
-    if not FA_Enabled then return end
-    if not NR_IsFiring then return end
-    local now = tick()
-    if now - FA_LastFire >= FA_Speed then
+-- ====================== CUSTOM KILL FEED ======================
+local function SetupKillFeedListener()
+    task.delay(4, function()
         pcall(function()
-            if mouse1click then
-                mouse1click()
-            elseif vim then
-                vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-                task.wait(0.01)
-                vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+            if Neuron and Neuron.net and Neuron.net.packets then
+                local packet = Neuron.net.packets.round_died
+                if packet and packet.Connect then
+                    packet:Connect(function(data)
+                        if not KF_Enabled then return end
+                        if not data then return end
+
+                        local killed = data.player
+                        local killer = data.killer
+                        local assist = data.assistingPlayer
+                        local headshot = data.headShot
+                        local weaponID = data.weaponID
+
+                        if not killed then return end
+
+                        local killerName = killer and killer.DisplayName or "World"
+                        local killedName = killed.DisplayName
+                        local assistName = assist and assist.DisplayName or nil
+
+                        local weaponName = weaponID or "weapon"
+                        local weaponAliases = {
+                            ["burst"] = "Burst Carbine",
+                            ["handgun"] = "Pistol",
+                            ["tec9"] = "Tec-9",
+                            ["flintlock"] = "Flintlock",
+                            ["bolt_action_sniper"] = "Sniper",
+                            ["taser"] = "Tazer",
+                            ["satchel"] = "Satchel",
+                            ["fist"] = "Knife",
+                            ["ak47"] = "AK-47",
+                            ["ar"] = "Assault Rifle",
+                            ["deagle"] = "Desert Eagle",
+                            ["minigun"] = "Minigun",
+                            ["pistol"] = "Pistol",
+                            ["pulse_rifle"] = "Pulse Rifle",
+                            ["raygun"] = "Ray Gun",
+                            ["rpg"] = "RPG",
+                            ["shotgun"] = "Shotgun",
+                            ["sniper"] = "Sniper",
+                            ["scar_h"] = "SCAR-H",
+                            ["lmg"] = "LMG",
+                            ["tommy_gun"] = "Tommy Gun",
+                            ["knife"] = "Knife",
+                            ["karambit"] = "Karambit",
+                            ["katana"] = "Katana",
+                            ["butterfly_knife"] = "Butterfly Knife",
+                            ["scythe"] = "Scythe",
+                            ["shorty"] = "Shorty",
+                            ["grenade"] = "Grenade",
+                            ["molotov"] = "Molotov",
+                            ["precision_burst_carbine"] = "Burst Carbine",
+                            ["tazer"] = "Tazer",
+                            ["satchel_explosive"] = "Satchel",
+                            ["flintlock_pistol"] = "Flintlock",
+                            ["tec-9"] = "Tec-9",
+                        }
+                        if weaponAliases[weaponName] then
+                            weaponName = weaponAliases[weaponName]
+                        end
+
+                        local text = killerName .. " > " .. killedName .. " [" .. weaponName .. "]"
+                        if headshot then text = text .. " [HS]" end
+                        if assistName then text = text .. " (+ " .. assistName .. ")" end
+
+                        local entry = Drawing.new('Text')
+                        entry.Text = text
+                        entry.Size = 14
+                        entry.Center = false
+                        entry.Outline = true
+                        entry.Font = Drawing.Fonts.Plex
+                        entry.Color = headshot and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(255, 255, 255)
+                        entry.Visible = true
+
+                        table.insert(KF_Pool, {
+                            drawing = entry,
+                            expire = tick() + KF_Duration,
+                            duration = KF_Duration
+                        })
+
+                        while #KF_Pool > KF_MaxEntries do
+                            local old = table.remove(KF_Pool, 1)
+                            pcall(function() old.drawing:Remove() end)
+                        end
+                    end)
+                end
             end
         end)
-        FA_LastFire = now
-    end
+    end)
 end
 
--- ====================== BULLET TRACER FADE LOGIC ======================
-local function Update_BulletTracers()
+SetupKillFeedListener()
+
+local function Update_KillFeed()
     local now = tick()
-    for i = #BT_Pool, 1, -1 do
-        local t = BT_Pool[i]
-        if now > t.expire then
-            pcall(function() t.drawing:Remove() end)
-            table.remove(BT_Pool, i)
+    local screen_size = Camera.ViewportSize
+    local y_start = 150
+
+    for i = #KF_Pool, 1, -1 do
+        local entry = KF_Pool[i]
+        if now > entry.expire then
+            pcall(function() entry.drawing:Remove() end)
+            table.remove(KF_Pool, i)
         else
-            local remaining = (t.expire - now) / t.duration
-            t.drawing.Transparency = 1 - remaining
+            local remaining = (entry.expire - now) / entry.duration
+            local fade = math.clamp(remaining * 2, 0, 1)
+            entry.drawing.Position = v2_new(screen_size.X - 350, y_start + (#KF_Pool - i) * 20)
+            entry.drawing.Transparency = 1 - fade
         end
     end
 end
 
--- ====================== PARTICLE CONTROL LOGIC ======================
-local function Update_ParticleControl()
-    if not PC_Enabled then return end
-    local char = LocalPlayer.Character
-    if not char then return end
-    for _, child in ipairs(char:GetChildren()) do
-        if child:IsA('Tool') or child:GetAttribute('IsWeapon') then
-            if VFXUtility and VFXUtility.SetParticleState then
-                VFXUtility:SetParticleState(child, false)
+-- ====================== DEVICE CHANGER ======================
+local function Update_DeviceChanger()
+    if not DC_Enabled then return end
+    if not GameplayHandler then return end
+
+    -- Try to modify the device icon in the UI
+    pcall(function()
+        if GameplayHandler.playerFrame then
+            local deviceFrame = GameplayHandler.playerFrame:FindFirstChild("Device")
+            if deviceFrame then
+                local icon = deviceFrame:FindFirstChild("Icon")
+                if icon and icon:IsA("ImageLabel") then
+                    local deviceOffsets = {
+                        ["1"] = { Vector2.new(104, 154), Vector2.new(48, 72) },
+                        ["2"] = { Vector2.new(166, 154), Vector2.new(102, 72) },
+                        ["default"] = { Vector2.new(0, 154), Vector2.new(90, 72) }
+                    }
+                    local offset = deviceOffsets[DC_Device] or deviceOffsets["default"]
+                    icon.ImageRectOffset = offset[1]
+                    icon.ImageRectSize = offset[2]
+                end
             end
         end
+    end)
+
+    -- Also try hooking DataHandler
+    if DataHandler and DataHandler.GetDataAsync then
+        local original = DataHandler.GetDataAsync
+        DataHandler.GetDataAsync = function(self, player, ...)
+            local result = original(self, player, ...)
+            if player == LocalPlayer and DC_Enabled and result then
+                result.Device = DC_Device == "default" and nil or tonumber(DC_Device)
+            end
+            return result
+        end
     end
 end
+
+local DC_Hooked = false
+local function TryHookDataHandler()
+    if DC_Hooked then return end
+    if not DataHandler then return end
+    if not DataHandler.GetDataAsync then return end
+
+    pcall(function()
+        local original = DataHandler.GetDataAsync
+        DataHandler.GetDataAsync = function(self, player, ...)
+            local result = original(self, player, ...)
+            if player == LocalPlayer and DC_Enabled and result then
+                result.Device = DC_Device == "default" and nil or tonumber(DC_Device)
+            end
+            return result
+        end
+        DC_Hooked = true
+    end)
+end
+
+task.delay(4.5, function()
+    TryHookDataHandler()
+end)
 
 -- ====================== RENDER LOOPS ======================
 RunService.RenderStepped:Connect(function()
@@ -1310,112 +1302,73 @@ RunService.RenderStepped:Connect(function()
     Update_FOV()
     Update_Triggerbot()
     Update_NoRecoil()
-    Update_Hitbox()
     Update_BotESP()
     Update_Rainbow()
-    Update_FullAuto()
-    Update_BulletTracers()
+    Update_KillFeed()
+    Update_DeviceChanger()
 end)
 
-task.spawn(function()
-    while true do
-        Update_ParticleControl()
-        task.wait(1)
-    end
-end)
-
--- ====================== CLEANUP HOOKS ======================
 Players.PlayerRemoving:Connect(function(player)
     Remove_ESP_Drawings(player)
-    HB_OriginalSizes[player] = nil
 end)
 
 -- ====================== COMBAT TAB ======================
 do
     local CombatTab = Tabs.Combat
 
-    -- AIMBOT (ORIGINAL)
     local AimBox = CombatTab:AddLeftGroupbox('Aimbot')
-
     AimBox:AddToggle('Aimbot_Enabled', {
-        Text = 'Aimbot',
-        Default = false,
+        Text = 'Aimbot', Default = false,
         Tooltip = 'Uses CameraHandler.currentRotation',
-        Callback = function(Value) Aimbot_Enabled = Value end
+        Callback = function(v) Aimbot_Enabled = v end
     })
-
     AimBox:AddSlider('Aim_FOV', {
-        Text = 'FOV',
-        Default = 150,
-        Min = 20,
-        Max = 500,
-        Rounding = 0,
-        Suffix = 'px',
-        Callback = function(Value) Aim_FOV = Value end
+        Text = 'FOV', Default = 150, Min = 20, Max = 500, Rounding = 0, Suffix = 'px',
+        Callback = function(v) Aim_FOV = v end
     })
-
     AimBox:AddSlider('Aim_Smoothness', {
-        Text = 'Smoothness',
-        Default = 3,
-        Min = 1,
-        Max = 20,
-        Rounding = 1,
-        Callback = function(Value) Aim_Smoothness = Value end
+        Text = 'Smoothness', Default = 3, Min = 1, Max = 20, Rounding = 1,
+        Callback = function(v) Aim_Smoothness = v end
     })
-
     AimBox:AddDropdown('Aim_Part', {
-        Text = 'Aim Part',
-        Default = 'Head',
+        Text = 'Aim Part', Default = 'Head',
         Values = { 'Head', 'HumanoidRootPart', 'Torso', 'Random' },
-        Callback = function(Value) Aim_Part = Value end
+        Callback = function(v) Aim_Part = v end
+    })
+    AimBox:AddToggle('Aim_DeathCheck', {
+        Text = 'Death Check (HitHandler)', Default = true,
+        Callback = function(v) Aim_DeathCheck = v end
     })
 
-    -- CHECKS
     local CheckBox = CombatTab:AddRightGroupbox('Checks')
-
     CheckBox:AddToggle('Visible_Check', {
-        Text = 'Visible Check',
-        Default = true,
-        Tooltip = 'Only aim at players you can see',
-        Callback = function(Value) Aim_Visible_Check = Value end
+        Text = 'Visible Check', Default = true,
+        Callback = function(v) Aim_Visible_Check = v end
     })
-
     CheckBox:AddToggle('Team_Check', {
-        Text = 'Team Check',
-        Default = false,
-        Tooltip = 'Ignore teammates',
-        Callback = function(Value) Team_Check = Value end
+        Text = 'Team Check', Default = false,
+        Callback = function(v) Team_Check = v end
     })
-
     CheckBox:AddDivider()
-
     CheckBox:AddToggle('FOV_Circle', {
-        Text = 'Draw FOV',
-        Default = true,
-        Callback = function(Value) FOV_Circle_Enabled = Value end
+        Text = 'Draw FOV', Default = true,
+        Callback = function(v) FOV_Circle_Enabled = v end
     })
-
     CheckBox:AddDropdown('FOV_FillStyle', {
-        Text = 'FOV Fill Style',
-        Default = 'Outline',
+        Text = 'FOV Fill Style', Default = 'Outline',
         Values = { 'Outline', 'Half Full', 'Fully Full' },
         Callback = function(v) FOV_FillStyle = v end
     })
-
     CheckBox:AddLabel('FOV Color'):AddColorPicker('FOV_Color', {
         Default = Color3.fromRGB(255, 255, 255),
-        Callback = function(Value) FOV_Circle_Color = Value end
+        Callback = function(v) FOV_Circle_Color = v end
     })
-
-    CheckBox:AddLabel('Camera: ' .. (CameraHandler and 'Custom' or 'Fallback'))
 
     -- SILENT AIM
     local SAGroup = CombatTab:AddLeftGroupbox('Silent Aim')
-
     SAGroup:AddToggle('SA_Enable', {
-        Text = 'Silent Aim',
-        Default = false,
-        Tooltip = 'Redirects shot packets via hookfunction',
+        Text = 'Silent Aim (Utils)', Default = false,
+        Tooltip = 'Uses Utils:raycast for everything',
         Callback = function(v)
             SA_Enabled = v
             if v and not SA_Hooked then
@@ -1423,197 +1376,95 @@ do
                     local attempts = 0
                     while not SA_Hooked and attempts < 10 do
                         HookShotRemote()
-                        if not SA_Hooked then
-                            task.wait(1)
-                            attempts = attempts + 1
-                        end
+                        if not SA_Hooked then task.wait(1) attempts = attempts + 1 end
                     end
                 end)
             end
         end
     })
-
     SAGroup:AddSlider('SA_FOV', {
-        Text = 'Silent Aim FOV',
-        Default = 300, Min = 10, Max = 1000, Rounding = 0, Suffix = 'px',
+        Text = 'Silent Aim FOV', Default = 300, Min = 10, Max = 1000, Rounding = 0, Suffix = 'px',
         Callback = function(v) SA_FOV = v end
     })
-
     SAGroup:AddDropdown('SA_Part', {
-        Text = 'Target Part',
-        Default = 'Head',
+        Text = 'Target Part', Default = 'Head',
         Values = { 'Head', 'HumanoidRootPart', 'Torso', 'Random' },
         Callback = function(v) SA_TargetPart = v end
     })
-
     SAGroup:AddToggle('SA_Visible', {
-        Text = 'Visible Check (Utils:raycast)',
-        Default = true,
+        Text = 'Visible Check (Utils:raycast)', Default = true,
         Callback = function(v) SA_VisibleCheck = v end
     })
-
     SAGroup:AddToggle('SA_Team', {
-        Text = 'Team Check',
-        Default = false,
+        Text = 'Team Check', Default = false,
         Callback = function(v) SA_TeamCheck = v end
     })
-
     SAGroup:AddToggle('SA_Death', {
-        Text = 'Death Check',
-        Default = true,
+        Text = 'Death Check (HitHandler)', Default = true,
         Callback = function(v) SA_DeathCheck = v end
     })
-
     SAGroup:AddToggle('SA_Prediction', {
-        Text = 'Prediction',
-        Default = true,
+        Text = 'Prediction (Utils:raycast)', Default = true,
         Callback = function(v) SA_Prediction = v end
     })
-
     SAGroup:AddSlider('SA_ProjSpeed', {
-        Text = 'Projectile Speed',
-        Default = 2000, Min = 100, Max = 10000, Rounding = 0,
+        Text = 'Projectile Speed', Default = 2000, Min = 100, Max = 10000, Rounding = 0,
         Callback = function(v) SA_ProjectileSpeed = v end
     })
-
     SAGroup:AddDivider()
     SAGroup:AddLabel('Hook: ' .. (SA_Hooked and SA_HookMethod or 'Inactive'))
     SAGroup:AddLabel('Remote: ' .. (ShotRemote and 'Found' or 'Loading...'))
-    SAGroup:AddLabel('Wall Check: ' .. (Utils and 'Utils:raycast' or 'Fallback'))
+    SAGroup:AddLabel('Utils: ' .. (Utils and 'Loaded' or 'Loading...'))
 
     -- TRIGGERBOT
     local TBGroup = CombatTab:AddLeftGroupbox('Triggerbot')
-
     TBGroup:AddToggle('TB_Enable', {
-        Text = 'Triggerbot',
-        Default = false,
+        Text = 'Triggerbot', Default = false,
         Callback = function(v) TB_Enabled = v end
     })
-
     TBGroup:AddSlider('TB_FOV', {
-        Text = 'Trigger FOV',
-        Default = 60, Min = 5, Max = 300, Rounding = 0, Suffix = 'px',
+        Text = 'Trigger FOV', Default = 60, Min = 5, Max = 300, Rounding = 0, Suffix = 'px',
         Callback = function(v) TB_FOV = v end
     })
-
     TBGroup:AddSlider('TB_Delay', {
-        Text = 'Fire Delay',
-        Default = 0.05, Min = 0.01, Max = 1.0, Rounding = 2, Suffix = 's',
+        Text = 'Fire Delay', Default = 0.05, Min = 0.01, Max = 1.0, Rounding = 2, Suffix = 's',
         Callback = function(v) TB_Delay = v end
     })
-
     TBGroup:AddDropdown('TB_Part', {
-        Text = 'Target Part',
-        Default = 'Torso',
+        Text = 'Target Part', Default = 'Torso',
         Values = { 'Head', 'HumanoidRootPart', 'Torso', 'Random' },
         Callback = function(v) TB_TargetPart = v end
     })
-
     TBGroup:AddToggle('TB_Visible', {
-        Text = 'Visible Check',
-        Default = true,
+        Text = 'Visible Check (Utils)', Default = true,
         Callback = function(v) TB_VisibleCheck = v end
     })
-
     TBGroup:AddToggle('TB_Team', {
-        Text = 'Team Check',
-        Default = true,
+        Text = 'Team Check', Default = true,
         Callback = function(v) TB_TeamCheck = v end
     })
-
     TBGroup:AddToggle('TB_Death', {
-        Text = 'Death Check',
-        Default = true,
+        Text = 'Death Check', Default = true,
         Callback = function(v) TB_DeathCheck = v end
     })
 
-    -- WEAPON MODS
-    local FAGroup = CombatTab:AddLeftGroupbox('Weapon Mods')
-
-    FAGroup:AddToggle('FA_Enable', {
-        Text = 'Full Auto',
-        Default = false,
-        Tooltip = 'Rapid fire simulation for semi-auto weapons',
-        Callback = function(v) FA_Enabled = v end
-    })
-
-    FAGroup:AddSlider('FA_Speed', {
-        Text = 'Fire Rate',
-        Default = 0.05, Min = 0.01, Max = 0.5, Rounding = 3, Suffix = 's',
-        Tooltip = 'Lower = faster fire',
-        Callback = function(v) FA_Speed = v end
-    })
-
-    FAGroup:AddDivider()
-    FAGroup:AddLabel('FireSystem: ' .. (WeaponSystems.FireSystem and 'Loaded' or 'N/A'))
-    FAGroup:AddLabel('ReloadSystem: ' .. (WeaponSystems.ReloadSystem and 'Loaded' or 'N/A'))
-    FAGroup:AddLabel('ModeSystem: ' .. (WeaponSystems.ModeSystem and 'Loaded' or 'N/A'))
-
     -- NO RECOIL
     local NRGroup = CombatTab:AddRightGroupbox('Recoil Control')
-
     NRGroup:AddToggle('NR_Enable', {
-        Text = 'No Recoil',
-        Default = false,
+        Text = 'No Recoil', Default = false,
         Callback = function(v) NR_Enabled = v end
     })
-
     NRGroup:AddToggle('NR_Pitch', {
-        Text = 'Counter Pitch',
-        Default = true,
+        Text = 'Counter Pitch', Default = true,
         Callback = function(v) NR_PitchLock = v end
     })
-
     NRGroup:AddToggle('NR_Yaw', {
-        Text = 'Counter Yaw',
-        Default = false,
+        Text = 'Counter Yaw', Default = false,
         Callback = function(v) NR_YawLock = v end
     })
-
     NRGroup:AddSlider('NR_Intensity', {
-        Text = 'Counter Intensity',
-        Default = 100, Min = 0, Max = 100, Rounding = 0, Suffix = '%',
+        Text = 'Counter Intensity', Default = 100, Min = 0, Max = 100, Rounding = 0, Suffix = '%',
         Callback = function(v) NR_Intensity = v / 100 end
-    })
-
-    -- HITBOX EXPANDER
-    local HBGroup = CombatTab:AddRightGroupbox('Hitbox Expander')
-
-    HBGroup:AddToggle('HB_Enable', {
-        Text = 'Hitbox Expander',
-        Default = false,
-        Callback = function(v) HB_Enabled = v end
-    })
-
-    HBGroup:AddSlider('HB_Size', {
-        Text = 'Hitbox Size',
-        Default = 5, Min = 1, Max = 20, Rounding = 1, Suffix = ' studs',
-        Callback = function(v) HB_Size = v end
-    })
-
-    HBGroup:AddDropdown('HB_Part', {
-        Text = 'Target Part',
-        Default = 'HumanoidRootPart',
-        Values = { 'Head', 'HumanoidRootPart', 'Torso' },
-        Callback = function(v) HB_Part = v end
-    })
-
-    HBGroup:AddSlider('HB_Transparency', {
-        Text = 'Transparency',
-        Default = 0.5, Min = 0, Max = 1, Rounding = 1,
-        Callback = function(v) HB_Transparency = v end
-    })
-
-    HBGroup:AddToggle('HB_Team', {
-        Text = 'Team Check',
-        Default = true,
-        Callback = function(v) HB_TeamCheck = v end
-    })
-
-    HBGroup:AddToggle('HB_Death', {
-        Text = 'Death Check',
-        Default = true,
-        Callback = function(v) HB_DeathCheck = v end
     })
 end
 
@@ -1621,237 +1472,182 @@ end
 do
     local VisualTab = Tabs.Visual
 
-    -- ESP
     local ESPBox = VisualTab:AddLeftGroupbox('ESP')
-
     ESPBox:AddToggle('ESP_Enabled', {
-        Text = 'ESP',
-        Default = true,
-        Callback = function(Value) ESP_Enabled = Value end
+        Text = 'ESP', Default = true,
+        Callback = function(v) ESP_Enabled = v end
     })
-
     ESPBox:AddToggle('Box', {
-        Text = 'Box',
-        Default = true,
-        Callback = function(Value) Box_Enabled = Value end
+        Text = 'Box', Default = true,
+        Callback = function(v) Box_Enabled = v end
     })
-
     ESPBox:AddLabel('Box Color'):AddColorPicker('Box_Color', {
         Default = Color3.fromRGB(255, 255, 255),
-        Callback = function(Value) Box_Color = Value end
+        Callback = function(v) Box_Color = v end
     })
-
     ESPBox:AddToggle('Name', {
-        Text = 'Name',
-        Default = true,
-        Callback = function(Value) Name_Enabled = Value end
+        Text = 'Name', Default = true,
+        Callback = function(v) Name_Enabled = v end
     })
-
     ESPBox:AddLabel('Name Color'):AddColorPicker('Name_Color', {
         Default = Color3.fromRGB(255, 255, 255),
-        Callback = function(Value) Name_Color = Value end
+        Callback = function(v) Name_Color = v end
     })
-
     ESPBox:AddToggle('Health', {
-        Text = 'Health Bar',
-        Default = true,
-        Callback = function(Value) Health_Enabled = Value end
+        Text = 'Health Bar (States)', Default = true,
+        Callback = function(v) Health_Enabled = v end
     })
-
     ESPBox:AddToggle('Distance', {
-        Text = 'Distance',
-        Default = true,
-        Callback = function(Value) Distance_Enabled = Value end
+        Text = 'Distance', Default = true,
+        Callback = function(v) Distance_Enabled = v end
     })
 
-    -- TRACERS & DOTS
     local TracerBox = VisualTab:AddRightGroupbox('Tracers & Dots')
-
     TracerBox:AddToggle('Tracer', {
-        Text = 'Tracers',
-        Default = true,
-        Callback = function(Value) Tracer_Enabled = Value end
+        Text = 'Tracers', Default = true,
+        Callback = function(v) Tracer_Enabled = v end
     })
-
     TracerBox:AddLabel('Tracer Color'):AddColorPicker('Tracer_Color', {
         Default = Color3.fromRGB(255, 255, 255),
-        Callback = function(Value) Tracer_Color = Value end
+        Callback = function(v) Tracer_Color = v end
     })
-
     TracerBox:AddDropdown('Tracer_Origin', {
-        Text = 'Tracer Origin',
-        Default = 'Bottom',
+        Text = 'Tracer Origin', Default = 'Bottom',
         Values = { 'Bottom', 'Middle', 'Top' },
-        Callback = function(Value) Tracer_Origin = Value end
+        Callback = function(v) Tracer_Origin = v end
     })
-
     TracerBox:AddDivider()
-
     TracerBox:AddToggle('Head_Dot', {
-        Text = 'Head Dot',
-        Default = true,
-        Callback = function(Value) Head_Dot_Enabled = Value end
+        Text = 'Head Dot', Default = true,
+        Callback = function(v) Head_Dot_Enabled = v end
     })
-
     TracerBox:AddLabel('Dot Color'):AddColorPicker('Head_Dot_Color', {
         Default = Color3.fromRGB(255, 0, 0),
-        Callback = function(Value) Head_Dot_Color = Value end
+        Callback = function(v) Head_Dot_Color = v end
     })
+
+    -- GAME-AWARE ESP
+    local GameAwareBox = VisualTab:AddLeftGroupbox('Game-Aware ESP')
+    GameAwareBox:AddToggle('ESP_TeamColors', {
+        Text = 'Team Colors (Blue/Orange)', Default = false,
+        Tooltip = 'Uses GameplayHandler team data',
+        Callback = function(v) ESP_TeamColors = v end
+    })
+    GameAwareBox:AddToggle('ESP_MatchAware', {
+        Text = 'Match State Labels', Default = false,
+        Tooltip = 'Shows IN MATCH / LOBBY / SPECTATING',
+        Callback = function(v) ESP_MatchAware = v end
+    })
+    GameAwareBox:AddToggle('ESP_SpectateDetect', {
+        Text = 'Spectate Detection', Default = false,
+        Tooltip = 'Shows who is spectating',
+        Callback = function(v) ESP_SpectateDetect = v end
+    })
+    GameAwareBox:AddDivider()
+    GameAwareBox:AddLabel('GameplayHandler: ' .. (GameplayHandler and 'Loaded' or 'Loading...'))
+    GameAwareBox:AddLabel('HitHandler: ' .. (HitHandler and 'Loaded' or 'Loading...'))
+    GameAwareBox:AddLabel('States: ' .. (States and 'Loaded' or 'Loading...'))
 
     -- RAINBOW
     local RainbowGroup = VisualTab:AddLeftGroupbox('Rainbow')
-
     RainbowGroup:AddToggle('Rainbow_Enable', {
-        Text = 'Rainbow Mode',
-        Default = false,
-        Tooltip = 'Cycles all ESP colors through rainbow',
+        Text = 'Rainbow Mode', Default = false,
         Callback = function(v) Rainbow_Enabled = v end
     })
-
     RainbowGroup:AddSlider('Rainbow_Speed', {
-        Text = 'Rainbow Speed',
-        Default = 3, Min = 1, Max = 20, Rounding = 0,
+        Text = 'Rainbow Speed', Default = 3, Min = 1, Max = 20, Rounding = 0,
         Callback = function(v) Rainbow_Speed = v / 1000 end
     })
-
     RainbowGroup:AddDropdown('Rainbow_Targets', {
-        Text = 'Apply To',
-        Default = 'Box',
+        Text = 'Apply To', Default = 'Box',
         Values = { 'Box', 'Name', 'Tracer', 'HeadDot', 'FOV' },
         Callback = function(v)
             local found = false
             for i, t in ipairs(Rainbow_Targets) do
-                if t == v then
-                    table.remove(Rainbow_Targets, i)
-                    found = true
-                    break
-                end
+                if t == v then table.remove(Rainbow_Targets, i) found = true break end
             end
-            if not found then
-                table.insert(Rainbow_Targets, v)
-            end
+            if not found then table.insert(Rainbow_Targets, v) end
         end
     })
 
-    -- BULLET TRACERS (via shot remote OnClientEvent)
-    local BTGroup = VisualTab:AddLeftGroupbox('Bullet Tracers')
-
-    BTGroup:AddToggle('BT_Enable', {
-        Text = 'Bullet Tracers',
-        Default = false,
-        Tooltip = 'Listens to shot remote OnClientEvent',
-        Callback = function(v) BT_Enabled = v end
-    })
-
-    BTGroup:AddLabel('Tracer Color'):AddColorPicker('BT_Color', {
-        Default = Color3.fromRGB(255, 220, 0),
-        Callback = function(v) BT_Color = v end
-    })
-
-    BTGroup:AddSlider('BT_Duration', {
-        Text = 'Duration',
-        Default = 0.4, Min = 0.1, Max = 2.0, Rounding = 1, Suffix = 's',
-        Callback = function(v) BT_Duration = v end
-    })
-
-    BTGroup:AddSlider('BT_Thickness', {
-        Text = 'Thickness',
-        Default = 1.5, Min = 0.5, Max = 5, Rounding = 1,
-        Callback = function(v) BT_Thickness = v end
-    })
-
-    BTGroup:AddDivider()
-    BTGroup:AddLabel('Listener: ' .. (BT_ListenerSetup and 'OnClientEvent' or 'Waiting...'))
-
-    -- PERFORMANCE
-    local PCGroup = VisualTab:AddLeftGroupbox('Performance')
-
-    PCGroup:AddToggle('PC_Enable', {
-        Text = 'Disable Weapon Particles',
-        Default = false,
-        Tooltip = 'Uses VFXUtility to disable particle emitters',
-        Callback = function(v) PC_Enabled = v end
-    })
-
-    PCGroup:AddDivider()
-    PCGroup:AddLabel('VFXUtility: ' .. (VFXUtility and 'Loaded' or 'Loading...'))
-    PCGroup:AddLabel('Utils: ' .. (Utils and 'Loaded' or 'Loading...'))
-    PCGroup:AddLabel('WeaponECS: ' .. (WeaponECS and 'Loaded' or 'Loading...'))
-
-    -- BOT DETECTION
+    -- BOT ESP
     local BotGroup = VisualTab:AddRightGroupbox('Bot Detection')
-
     BotGroup:AddToggle('BotESP_Enable', {
-        Text = 'Bot ESP',
-        Default = false,
+        Text = 'Bot ESP', Default = false,
         Callback = function(v) BotESP_Enabled = v end
     })
-
     BotGroup:AddLabel('Bot Color'):AddColorPicker('BotESP_Color', {
         Default = Color3.fromRGB(0, 255, 140),
         Callback = function(v) BotESP_Color = v end
     })
-
     BotGroup:AddLabel('Finisher Color'):AddColorPicker('BotESP_Finisher', {
         Default = Color3.fromRGB(255, 50, 150),
         Callback = function(v) BotESP_FinisherColor = v end
     })
-
     BotGroup:AddToggle('BotESP_ShowID', {
-        Text = 'Show Bot User ID',
-        Default = false,
+        Text = 'Show Bot User ID', Default = false,
         Callback = function(v) BotESP_ShowID = v end
     })
-
     BotGroup:AddDivider()
-
     BotGroup:AddButton('Count Active Dummies', function()
         local count = GetDummyCount()
         BotGroup:AddLabel('Count: ' .. tostring(count))
     end)
+end
 
-    BotGroup:AddDivider()
-    BotGroup:AddLabel('DummyClient: ' .. (DummyClient and 'Connected' or 'Loading...'))
-    BotGroup:AddLabel('Neuron: ' .. (Neuron and 'Loaded' or 'Loading...'))
+-- ====================== MISC TAB ======================
+do
+    local MiscTab = Tabs.Misc
+
+    -- CUSTOM KILL FEED
+    local KFGroup = MiscTab:AddLeftGroupbox('Custom Kill Feed')
+    KFGroup:AddToggle('KF_Enable', {
+        Text = 'Custom Kill Feed', Default = false,
+        Tooltip = 'Listens to round_died packet',
+        Callback = function(v) KF_Enabled = v end
+    })
+    KFGroup:AddSlider('KF_MaxEntries', {
+        Text = 'Max Entries', Default = 5, Min = 1, Max = 10, Rounding = 0,
+        Callback = function(v) KF_MaxEntries = v end
+    })
+    KFGroup:AddSlider('KF_Duration', {
+        Text = 'Duration', Default = 5, Min = 1, Max = 15, Rounding = 0, Suffix = 's',
+        Callback = function(v) KF_Duration = v end
+    })
+    KFGroup:AddDivider()
+    KFGroup:AddLabel('Listener: ' .. (Neuron and 'Loading...' or 'Waiting...'))
+
+    -- DEVICE CHANGER
+    local DCGroup = MiscTab:AddRightGroupbox('Device Changer')
+    DCGroup:AddToggle('DC_Enable', {
+        Text = 'Spoof Device', Default = false,
+        Tooltip = 'Changes your device icon in scoreboard',
+        Callback = function(v) DC_Enabled = v end
+    })
+    DCGroup:AddDropdown('DC_Device', {
+        Text = 'Device', Default = '1',
+        Values = { '1', '2', 'default' },
+        Tooltip = '1 = Device 1, 2 = Device 2, default = Unknown',
+        Callback = function(v) DC_Device = v end
+    })
+    DCGroup:AddDivider()
+    DCGroup:AddLabel('DataHandler: ' .. (DataHandler and 'Loaded' or 'Loading...'))
+    DCGroup:AddLabel('Hook: ' .. (DC_Hooked and 'Active' or 'Inactive'))
 end
 
 -- ====================== SETTINGS TAB ======================
 local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu')
 MenuGroup:AddButton('Unload', function()
-    -- ESP pool
     for player, d in pairs(ESP_Pool) do
-        for _, drawing in pairs(d) do
-            pcall(function() drawing:Remove() end)
-        end
+        for _, drawing in pairs(d) do pcall(function() drawing:Remove() end) end
     end
-    -- Bot ESP pool
     for ent, d in pairs(BotESP_Pool) do
-        for _, drawing in pairs(d) do
-            pcall(function() drawing:Remove() end)
-        end
+        for _, drawing in pairs(d) do pcall(function() drawing:Remove() end) end
     end
-    -- Bullet tracer pool
-    for _, t in ipairs(BT_Pool) do
-        pcall(function() t.drawing:Remove() end)
+    for _, entry in ipairs(KF_Pool) do
+        pcall(function() entry.drawing:Remove() end)
     end
-    -- FOV
     pcall(function() FOV_Drawing:Remove() end)
-    -- Restore hitboxes
-    for player, parts in pairs(HB_OriginalSizes) do
-        if player.Parent then
-            local char = player.Character
-            if char then
-                for partName, origSize in pairs(parts) do
-                    local part = char:FindFirstChild(partName)
-                    if part and part:IsA('BasePart') then
-                        part.Size = origSize
-                        part.Transparency = 0
-                        part.Material = Enum.Material.Plastic
-                    end
-                end
-            end
-        end
-    end
     Library:Unload()
 end)
 MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { Default = 'End', NoUI = true, Text = 'Menu keybind' })
@@ -1861,32 +1657,32 @@ local AdvancedGroup = Tabs['UI Settings']:AddLeftGroupbox('Advanced')
 AdvancedGroup:AddToggle('ShowAdvanced', { Text = 'Show advanced options', Default = false })
 
 local AdvancedBox = AdvancedGroup:AddDependencyBox()
-AdvancedBox:AddSlider('UIScaleSlider', { Text = 'UI scale', Default = 100, Min = 50, Max = 150, Rounding = 0, Suffix = '%', Callback = function(Value) Window:SetScale(Value / 100) end })
-AdvancedBox:AddSlider('UITransparencySlider', { Text = 'Menu transparency', Default = 0, Min = 0, Max = 90, Rounding = 0, Suffix = '%', Callback = function(Value) Window:SetTransparency(Value / 100) end })
-AdvancedBox:AddToggle('MobileButtonToggle', { Text = 'Show floating mobile button', Default = true, Callback = function(Value) Library:SetMobileButtonVisibility(Value) end })
+AdvancedBox:AddSlider('UIScaleSlider', { Text = 'UI scale', Default = 100, Min = 50, Max = 150, Rounding = 0, Suffix = '%', Callback = function(v) Window:SetScale(v / 100) end })
+AdvancedBox:AddSlider('UITransparencySlider', { Text = 'Menu transparency', Default = 0, Min = 0, Max = 90, Rounding = 0, Suffix = '%', Callback = function(v) Window:SetTransparency(v / 100) end })
+AdvancedBox:AddToggle('MobileButtonToggle', { Text = 'Show floating mobile button', Default = true, Callback = function(v) Library:SetMobileButtonVisibility(v) end })
 AdvancedBox:AddDivider()
-AdvancedBox:AddDropdown('WeatherEffectDropdown', { Text = 'Weather effect', Values = { 'None', 'Snow', 'Rain', 'Lightning' }, Default = 'None', Callback = function(Value) Library:SetWeatherEffect(Value) end })
-AdvancedBox:AddDropdown('WeatherScopeDropdown', { Text = 'Weather location', Values = { 'Inside UI', 'Whole screen' }, Default = 'Inside UI', Callback = function(Value) Library:SetWeatherScope(Value == 'Whole screen' and 'Screen' or 'UI') end })
-AdvancedBox:AddToggle('GlowToggle', { Text = 'Open/close glow effect', Default = true, Callback = function(Value) Library:SetGlowEnabled(Value) end })
-AdvancedBox:AddLabel('Glow color'):AddColorPicker('GlowColorPicker', { Default = Color3.fromRGB(0, 85, 255), Callback = function(Value) Library:SetGlowColor(Value) end })
+AdvancedBox:AddDropdown('WeatherEffectDropdown', { Text = 'Weather effect', Values = { 'None', 'Snow', 'Rain', 'Lightning' }, Default = 'None', Callback = function(v) Library:SetWeatherEffect(v) end })
+AdvancedBox:AddDropdown('WeatherScopeDropdown', { Text = 'Weather location', Values = { 'Inside UI', 'Whole screen' }, Default = 'Inside UI', Callback = function(v) Library:SetWeatherScope(v == 'Whole screen' and 'Screen' or 'UI') end })
+AdvancedBox:AddToggle('GlowToggle', { Text = 'Open/close glow effect', Default = true, Callback = function(v) Library:SetGlowEnabled(v) end })
+AdvancedBox:AddLabel('Glow color'):AddColorPicker('GlowColorPicker', { Default = Color3.fromRGB(0, 85, 255), Callback = function(v) Library:SetGlowColor(v) end })
 AdvancedBox:AddDivider()
-AdvancedBox:AddSlider('AnimSpeedSlider', { Text = 'Animation speed', Default = 100, Min = 25, Max = 300, Rounding = 0, Suffix = '%', Callback = function(Value) Library:SetAnimationSpeed(Value / 100) end })
-AdvancedBox:AddSlider('CornerRadiusSlider', { Text = 'Corner roundness', Default = 0, Min = 0, Max = 16, Rounding = 0, Suffix = 'px', Callback = function(Value) Library:SetCornerRadius(Value) end })
-AdvancedBox:AddToggle('BlurToggle', { Text = 'Blur background', Default = false, Callback = function(Value) Library:SetBlurEnabled(Value) end })
-AdvancedBox:AddLabel('Accent color'):AddColorPicker('AccentColorPicker', { Default = Color3.fromRGB(0, 85, 255), Callback = function(Value) Library:SetAccentColor(Value) end })
-AdvancedBox:AddSlider('FontScaleSlider', { Text = 'Font size', Default = 100, Min = 70, Max = 160, Rounding = 0, Suffix = '%', Callback = function(Value) Library:SetFontScale(Value / 100) end })
+AdvancedBox:AddSlider('AnimSpeedSlider', { Text = 'Animation speed', Default = 100, Min = 25, Max = 300, Rounding = 0, Suffix = '%', Callback = function(v) Library:SetAnimationSpeed(v / 100) end })
+AdvancedBox:AddSlider('CornerRadiusSlider', { Text = 'Corner roundness', Default = 0, Min = 0, Max = 16, Rounding = 0, Suffix = 'px', Callback = function(v) Library:SetCornerRadius(v) end })
+AdvancedBox:AddToggle('BlurToggle', { Text = 'Blur background', Default = false, Callback = function(v) Library:SetBlurEnabled(v) end })
+AdvancedBox:AddLabel('Accent color'):AddColorPicker('AccentColorPicker', { Default = Color3.fromRGB(0, 85, 255), Callback = function(v) Library:SetAccentColor(v) end })
+AdvancedBox:AddSlider('FontScaleSlider', { Text = 'Font size', Default = 100, Min = 70, Max = 160, Rounding = 0, Suffix = '%', Callback = function(v) Library:SetFontScale(v / 100) end })
 AdvancedBox:AddLabel('Snap window to')
 AdvancedBox:AddButton({ Text = 'Top Left', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'TopLeft') end })
 AdvancedBox:AddButton({ Text = 'Top Right', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'TopRight') end })
 AdvancedBox:AddButton({ Text = 'Bottom Left', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'BottomLeft') end })
 AdvancedBox:AddButton({ Text = 'Bottom Right', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'BottomRight') end })
 AdvancedBox:AddButton({ Text = 'Center', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'Center') end })
-AdvancedBox:AddToggle('HapticsToggle', { Text = 'Haptic feedback', Default = false, Tooltip = 'Best-effort; only works with a connected gamepad', Callback = function(Value) Library:SetHapticsEnabled(Value) end })
-AdvancedBox:AddToggle('CompactModeToggle', { Text = 'Compact mode', Default = false, Tooltip = 'Tighter spacing -- takes effect on newly opened tabs', Callback = function(Value) Library:SetCompactMode(Value) end })
-AdvancedBox:AddToggle('SoundToggle', { Text = 'Click sound effects', Default = false, Callback = function(Value) Library:SetSoundEnabled(Value) end })
-AdvancedBox:AddSlider('SoundVolumeSlider', { Text = 'Click sound volume', Default = 40, Min = 0, Max = 100, Rounding = 0, Suffix = '%', Callback = function(Value) Library:SetSoundVolume(Value / 100) end })
-AdvancedBox:AddToggle('MobileAutoHideToggle', { Text = 'Auto-hide mobile button', Default = false, Callback = function(Value) Library:SetMobileAutoHide(Value) end })
-AdvancedBox:AddSlider('MobileAutoHideDelaySlider', { Text = 'Auto-hide delay', Default = 4, Min = 1, Max = 15, Rounding = 0, Suffix = 's', Callback = function(Value) Library:SetMobileAutoHideDelay(Value) end })
+AdvancedBox:AddToggle('HapticsToggle', { Text = 'Haptic feedback', Default = false, Tooltip = 'Best-effort; only works with a connected gamepad', Callback = function(v) Library:SetHapticsEnabled(v) end })
+AdvancedBox:AddToggle('CompactModeToggle', { Text = 'Compact mode', Default = false, Tooltip = 'Tighter spacing -- takes effect on newly opened tabs', Callback = function(v) Library:SetCompactMode(v) end })
+AdvancedBox:AddToggle('SoundToggle', { Text = 'Click sound effects', Default = false, Callback = function(v) Library:SetSoundEnabled(v) end })
+AdvancedBox:AddSlider('SoundVolumeSlider', { Text = 'Click sound volume', Default = 40, Min = 0, Max = 100, Rounding = 0, Suffix = '%', Callback = function(v) Library:SetSoundVolume(v / 100) end })
+AdvancedBox:AddToggle('MobileAutoHideToggle', { Text = 'Auto-hide mobile button', Default = false, Callback = function(v) Library:SetMobileAutoHide(v) end })
+AdvancedBox:AddSlider('MobileAutoHideDelaySlider', { Text = 'Auto-hide delay', Default = 4, Min = 1, Max = 15, Rounding = 0, Suffix = 's', Callback = function(v) Library:SetMobileAutoHideDelay(v) end })
 AdvancedBox:SetupDependencies({ { Toggles.ShowAdvanced, true } })
 
 -- ====================== ADDONS ======================

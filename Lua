@@ -1,9 +1,9 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║              COMPLETE UNIFIED SCRIPT v6 (CLEAN + COSMETICS)           ║
--- ║  Features: Aimbot+DeathCheck+Distance, ESP+TeamColors+MatchAware,    ║
--- ║  NoRecoil, BotESP, Rainbow, CustomKillFeed, DeviceChanger,           ║
--- ║  CharmEquipper, SprayColorChanger                                     ║
--- ║  Removed: Triggerbot, Silent Aim, BulletTracers, FullAuto, Hitbox    ║
+-- ║              COMPLETE UNIFIED SCRIPT v7 (LEGIT AIMBOT)                ║
+-- ║  Features: Aimbot+Speed+Reaction+LockOn+Distance+DeathCheck          ║
+-- ║  ESP+TeamColors+MatchAware+Spectate, BotESP, Rainbow,                ║
+-- ║  CustomKillFeed, DeviceChanger                                       ║
+-- ║  Removed: Triggerbot, SilentAim, NoRecoil, CharmChanger, SprayColor  ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 
 -- ====================== LOADER ======================
@@ -58,7 +58,6 @@ local Window = Library:CreateWindow({
 local Tabs = {
     Combat = Window:AddTab('Combat'),
     Visual = Window:AddTab('Visual'),
-    Cosmetics = Window:AddTab('Cosmetics'),
     Misc = Window:AddTab('Misc'),
     ['UI Settings'] = Window:AddTab('Settings'),
 }
@@ -161,10 +160,14 @@ task.delay(3.5, function()
 end)
 
 -- ====================== CONFIG ======================
--- AIMBOT
+-- AIMBOT (LEGIT SYSTEM)
 local Aimbot_Enabled = false
 local Aim_FOV = 150
-local Aim_Smoothness = 3
+local Aim_Speed = 0.3
+local Aim_SpeedInAttack = 0.15
+local Aim_SpeedScale = 100
+local Aim_MaxLockOnTime = 0
+local Aim_ReactionTime = 0
 local Aim_Part = 'Head'
 local Aim_Visible_Check = true
 local Team_Check = false
@@ -174,6 +177,25 @@ local FOV_Circle_Enabled = true
 local FOV_Circle_Color = Color3.fromRGB(255, 255, 255)
 local FOV_Circle_Transparency = 0.7
 local FOV_FillStyle = 'Outline'
+
+-- AIMBOT STATE
+local Aim_CurrentTarget = nil
+local Aim_LockOnStart = 0
+local Aim_ReactionStart = 0
+local Aim_IsReacting = false
+local Aim_IsFiring = false
+
+UserInput.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        Aim_IsFiring = true
+    end
+end)
+UserInput.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        Aim_IsFiring = false
+    end
+end)
 
 -- ESP
 local ESP_Enabled = true
@@ -191,27 +213,6 @@ local Head_Dot_Color = Color3.fromRGB(255, 0, 0)
 local ESP_TeamColors = false
 local ESP_MatchAware = false
 local ESP_SpectateDetect = false
-
--- NO RECOIL
-local NR_Enabled = false
-local NR_PitchLock = true
-local NR_YawLock = false
-local NR_Intensity = 1.0
-local NR_LastPitch = nil
-local NR_LastYaw = nil
-local NR_IsFiring = false
-
-UserInput.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        NR_IsFiring = true
-    end
-end)
-UserInput.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        NR_IsFiring = false
-    end
-end)
 
 -- BOT ESP
 local BotESP_Enabled = false
@@ -237,15 +238,6 @@ local DC_Enabled = false
 local DC_Device = '1'
 local DC_Hooked = false
 
--- CHARM EQUIPPER
-local Charm_Selected = 'None'
-local Charm_AutoRandom = false
-local Charm_LastRandom = 0
-
--- SPRAY COLOR CHANGER
-local SC_Enabled = false
-local SC_Color = Color3.fromRGB(255, 0, 0)
-
 -- ====================== DRAWING HELPERS ======================
 local v2_new = Vector2.new
 local v3_new = Vector3.new
@@ -257,7 +249,7 @@ local function World_To_Screen(position)
     return v2_new(point.X, point.Y), on_screen, point.Z
 end
 
--- ====================== DEATH CHECK (HitHandler + States) ======================
+-- ====================== DEATH CHECK ======================
 local function IsAlive(player)
     if not player then return false end
     resolve_player(player)
@@ -279,6 +271,36 @@ local function IsAlive(player)
     return humanoid.Health > 0
 end
 
+-- ====================== TEAM CHECK (GAME INTERNAL) ======================
+local function IsSameTeam(player)
+    if not Team_Check then return false end
+    if player == LocalPlayer then return true end
+
+    -- Use game's actual team system first
+    if GameplayHandler then
+        local localTeam = nil
+        local playerTeam = nil
+        pcall(function()
+            local _, duelID = GameplayHandler:GetLocalDuel()
+            if duelID then
+                localTeam = GameplayHandler:GetPlayerTeam(duelID, LocalPlayer)
+                playerTeam = GameplayHandler:GetPlayerTeam(duelID, player)
+            end
+        end)
+        if localTeam and playerTeam then
+            return localTeam.id == playerTeam.id
+        end
+    end
+
+    -- Fallback: only filter if both players actually have a Roblox team
+    if LocalPlayer.Team and player.Team then
+        return player.Team == LocalPlayer.Team
+    end
+
+    -- No team data available — don't filter
+    return false
+end
+
 -- ====================== GAMEPLAY DATA HELPERS ======================
 local function GetPlayerMatchState(player)
     if not GameplayHandler or not GameplayHandler.PlayerGameData then return "unknown" end
@@ -288,15 +310,6 @@ local function GetPlayerMatchState(player)
     if data.spectating then return "SPECTATING" end
     if data.state == "duel" then return "IN MATCH" end
     return "unknown"
-end
-
-local function GetPlayerTeamInfo(player)
-    if not GameplayHandler then return nil end
-    local localDuel, duelID = GameplayHandler:GetLocalDuel()
-    if not localDuel then return nil end
-    local team = GameplayHandler:GetPlayerTeam(duelID, player)
-    if not team then return nil end
-    return team
 end
 
 local function IsPlayerSpectating(player)
@@ -309,15 +322,14 @@ local function IsPlayerSpectating(player)
 end
 
 local function GetTeamColor(player)
-    local team = GetPlayerTeamInfo(player)
-    if not team then return nil, false, false end
-    local color = nil
-    if team.color == "Blue" then
-        color = Color3.fromRGB(0, 154, 255)
-    elseif team.color == "Orange" then
-        color = Color3.fromRGB(255, 115, 39)
-    end
-    return color, team.ally == true, team.enemy == true
+    if not GameplayHandler then return nil end
+    local _, duelID = GameplayHandler:GetLocalDuel()
+    if not duelID then return nil end
+    local team = GameplayHandler:GetPlayerTeam(duelID, player)
+    if not team then return nil end
+    if team.color == "Blue" then return Color3.fromRGB(0, 154, 255) end
+    if team.color == "Orange" then return Color3.fromRGB(255, 115, 39) end
+    return nil
 end
 
 -- ====================== DUMMY HELPERS ======================
@@ -504,33 +516,75 @@ local function Cleanup_ESP()
     end
 end
 
--- ====================== AIMBOT LOGIC ======================
+-- ====================== AIMBOT LOGIC (LEGIT SYSTEM) ======================
+local function IsTargetValid(player)
+    if not player then return false end
+    if player == LocalPlayer then return false end
+    if IsSameTeam(player) then return false end
+    if Aim_DeathCheck and not IsAlive(player) then return false end
+    resolve_player(player)
+    local char = player.Character
+    if not char then return false end
+    local target_part = Get_Nearest_Part(player, Aim_Part)
+    if not target_part then return false end
+    if Get_Distance(player) > Aim_Distance then return false end
+    if Aim_Visible_Check and Is_Behind_Wall(target_part) then return false end
+    local screen_pos, on_screen = World_To_Screen(target_part.Position)
+    if not on_screen then return false end
+    local screen_center = v2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local dist = (screen_pos - screen_center).Magnitude
+    if dist > Aim_FOV then return false end
+    return true
+end
+
+local function GetScreenDistance(player)
+    local target_part = Get_Nearest_Part(player, Aim_Part)
+    if not target_part then return math.huge end
+    local screen_pos, on_screen = World_To_Screen(target_part.Position)
+    if not on_screen then return math.huge end
+    local screen_center = v2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    return (screen_pos - screen_center).Magnitude
+end
+
 local function Get_Closest_Target()
+    local screen_center = v2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local closest_player = nil
     local closest_distance = Aim_FOV
-    local screen_center = v2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
+    -- Check if current target is still valid (target sticking)
+    if Aim_CurrentTarget and Aim_CurrentTarget.Parent then
+        if IsTargetValid(Aim_CurrentTarget) then
+            -- Current target is still good — give it a stickiness bonus
+            -- Only switch if another target is 40% closer to crosshair
+            local current_dist = GetScreenDistance(Aim_CurrentTarget)
+
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= Aim_CurrentTarget and IsTargetValid(player) then
+                    local new_dist = GetScreenDistance(player)
+                    -- Need to be 40% closer to switch targets
+                    if new_dist < current_dist * 0.6 then
+                        closest_player = player
+                        closest_distance = new_dist
+                    end
+                end
+            end
+
+            if closest_player then
+                return closest_player
+            end
+            return Aim_CurrentTarget
+        end
+    end
+
+    -- No current target — find closest
+    Aim_CurrentTarget = nil
     for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if Team_Check and player.Team == LocalPlayer.Team then continue end
-        if Aim_DeathCheck and not IsAlive(player) then continue end
-        resolve_player(player)
-        local char = player.Character
-        if not char then continue end
-        local target_part = Get_Nearest_Part(player, Aim_Part)
-        if not target_part then continue end
-
-        -- Distance check
-        local target_distance = Get_Distance(player)
-        if target_distance > Aim_Distance then continue end
-
-        if Aim_Visible_Check and Is_Behind_Wall(target_part) then continue end
-        local screen_pos, on_screen = World_To_Screen(target_part.Position)
-        if not on_screen then continue end
-        local dist = (screen_pos - screen_center).Magnitude
-        if dist < closest_distance then
-            closest_distance = dist
-            closest_player = player
+        if IsTargetValid(player) then
+            local dist = GetScreenDistance(player)
+            if dist < closest_distance then
+                closest_distance = dist
+                closest_player = player
+            end
         end
     end
     return closest_player
@@ -556,19 +610,79 @@ local function Aim_At_Target(player)
     local currentPitch = currentRot.X
     local currentYaw = currentRot.Y
 
+    -- Robust yaw difference calculation (fixes flickering)
     local deltaYaw = targetYaw - currentYaw
-    if deltaYaw > math.pi then
+    while deltaYaw > math.pi do
         deltaYaw = deltaYaw - 2 * math.pi
-    elseif deltaYaw < -math.pi then
+    end
+    while deltaYaw < -math.pi do
         deltaYaw = deltaYaw + 2 * math.pi
     end
 
-    local alpha = math.clamp(1 / Aim_Smoothness, 0.01, 1)
-    local newPitch = currentPitch + (targetPitch - currentPitch) * alpha
+    local deltaPitch = targetPitch - currentPitch
+
+    -- Speed calculation
+    local base_speed = Aim_IsFiring and Aim_SpeedInAttack or Aim_Speed
+    local effective_speed = base_speed * (Aim_SpeedScale / 100)
+    local alpha = math.clamp(effective_speed, 0.001, 1)
+
+    local newPitch = currentPitch + deltaPitch * alpha
     local newYaw = currentYaw + deltaYaw * alpha
 
     newPitch = math.clamp(newPitch, -maxPitch, maxPitch)
     CameraHandler.currentRotation = Vector3.new(newPitch, newYaw, 0)
+end
+
+-- ====================== AIMBOT UPDATE ======================
+local function Update_Aimbot()
+    if not Aimbot_Enabled then
+        Aim_CurrentTarget = nil
+        Aim_IsReacting = false
+        return
+    end
+
+    local now = tick()
+
+    -- Max lock on time check
+    if Aim_MaxLockOnTime > 0 and Aim_CurrentTarget and (now - Aim_LockOnStart) >= Aim_MaxLockOnTime then
+        Aim_CurrentTarget = nil
+        Aim_IsReacting = false
+        return
+    end
+
+    local target = Get_Closest_Target()
+
+    -- Handle target switching with reaction time
+    if target ~= Aim_CurrentTarget then
+        if target then
+            -- New target acquired — start reaction timer
+            if not Aim_IsReacting then
+                Aim_IsReacting = true
+                Aim_ReactionStart = now
+                return
+            end
+
+            -- Check if reaction time has passed
+            local reaction_seconds = Aim_ReactionTime / 1000
+            if (now - Aim_ReactionStart) < reaction_seconds then
+                return -- Still reacting
+            end
+
+            -- Reaction time passed — switch target
+            Aim_CurrentTarget = target
+            Aim_LockOnStart = now
+            Aim_IsReacting = false
+        else
+            -- No target
+            Aim_CurrentTarget = nil
+            Aim_IsReacting = false
+            return
+        end
+    end
+
+    if Aim_CurrentTarget then
+        Aim_At_Target(Aim_CurrentTarget)
+    end
 end
 
 -- ====================== ESP UPDATE ======================
@@ -578,7 +692,7 @@ local function Update_ESP()
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
-        if Team_Check and player.Team == LocalPlayer.Team then continue end
+        if IsSameTeam(player) then continue end
         resolve_player(player)
         local char = player.Character
         if not char then
@@ -616,7 +730,7 @@ local function Update_ESP()
         local effective_dot_color = Head_Dot_Color
 
         if ESP_TeamColors then
-            local tColor, isAlly, isEnemy = GetTeamColor(player)
+            local tColor = GetTeamColor(player)
             if tColor then
                 effective_box_color = tColor
                 effective_name_color = tColor
@@ -726,13 +840,6 @@ local function Update_ESP()
     end
 end
 
--- ====================== AIMBOT UPDATE ======================
-local function Update_Aimbot()
-    if not Aimbot_Enabled then return end
-    local target = Get_Closest_Target()
-    if target then Aim_At_Target(target) end
-end
-
 -- ====================== FOV UPDATE ======================
 local function Update_FOV()
     if not FOV_Circle_Enabled then
@@ -756,35 +863,6 @@ local function Update_FOV()
         FOV_Drawing.Transparency = 0.3
     end
     FOV_Drawing.Visible = true
-end
-
--- ====================== NO RECOIL ======================
-local function Update_NoRecoil()
-    if not NR_Enabled then
-        NR_LastPitch = nil
-        NR_LastYaw = nil
-        return
-    end
-    if not CameraHandler or not CameraHandler.currentRotation then return end
-    local current = CameraHandler.currentRotation
-
-    if not NR_IsFiring then
-        NR_LastPitch = current.X
-        NR_LastYaw = current.Y
-    else
-        if NR_PitchLock and NR_LastPitch then
-            local recoilDelta = current.X - NR_LastPitch
-            local correctedPitch = current.X - (recoilDelta * NR_Intensity)
-            local maxPitch = CameraHandler.maxPitch or 1.5673
-            correctedPitch = math.clamp(correctedPitch, -maxPitch, maxPitch)
-            CameraHandler.currentRotation = Vector3.new(correctedPitch, current.Y, current.Z)
-        end
-        if NR_YawLock and NR_LastYaw then
-            local recoilDeltaY = current.Y - NR_LastYaw
-            local correctedYaw = current.Y - (recoilDeltaY * NR_Intensity)
-            CameraHandler.currentRotation = Vector3.new(current.X, correctedYaw, current.Z)
-        end
-    end
 end
 
 -- ====================== BOT ESP ======================
@@ -931,40 +1009,24 @@ local function SetupKillFeedListener()
 
                         local weaponName = weaponID or "weapon"
                         local weaponAliases = {
-                            ["burst"] = "Burst Carbine",
-                            ["handgun"] = "Pistol",
-                            ["tec9"] = "Tec-9",
-                            ["flintlock"] = "Flintlock",
-                            ["bolt_action_sniper"] = "Sniper",
-                            ["taser"] = "Tazer",
-                            ["satchel"] = "Satchel",
-                            ["fist"] = "Knife",
-                            ["ak47"] = "AK-47",
-                            ["ar"] = "Assault Rifle",
-                            ["deagle"] = "Desert Eagle",
-                            ["minigun"] = "Minigun",
-                            ["pistol"] = "Pistol",
-                            ["pulse_rifle"] = "Pulse Rifle",
-                            ["raygun"] = "Ray Gun",
-                            ["rpg"] = "RPG",
-                            ["shotgun"] = "Shotgun",
-                            ["sniper"] = "Sniper",
-                            ["scar_h"] = "SCAR-H",
-                            ["lmg"] = "LMG",
-                            ["tommy_gun"] = "Tommy Gun",
-                            ["knife"] = "Knife",
-                            ["karambit"] = "Karambit",
-                            ["katana"] = "Katana",
+                            ["burst"] = "Burst Carbine", ["handgun"] = "Pistol",
+                            ["tec9"] = "Tec-9", ["flintlock"] = "Flintlock",
+                            ["bolt_action_sniper"] = "Sniper", ["taser"] = "Tazer",
+                            ["satchel"] = "Satchel", ["fist"] = "Knife",
+                            ["ak47"] = "AK-47", ["ar"] = "Assault Rifle",
+                            ["deagle"] = "Desert Eagle", ["minigun"] = "Minigun",
+                            ["pistol"] = "Pistol", ["pulse_rifle"] = "Pulse Rifle",
+                            ["raygun"] = "Ray Gun", ["rpg"] = "RPG",
+                            ["shotgun"] = "Shotgun", ["sniper"] = "Sniper",
+                            ["scar_h"] = "SCAR-H", ["lmg"] = "LMG",
+                            ["tommy_gun"] = "Tommy Gun", ["knife"] = "Knife",
+                            ["karambit"] = "Karambit", ["katana"] = "Katana",
                             ["butterfly_knife"] = "Butterfly Knife",
-                            ["scythe"] = "Scythe",
-                            ["shorty"] = "Shorty",
-                            ["grenade"] = "Grenade",
-                            ["molotov"] = "Molotov",
+                            ["scythe"] = "Scythe", ["shorty"] = "Shorty",
+                            ["grenade"] = "Grenade", ["molotov"] = "Molotov",
                             ["precision_burst_carbine"] = "Burst Carbine",
-                            ["tazer"] = "Tazer",
-                            ["satchel_explosive"] = "Satchel",
-                            ["flintlock_pistol"] = "Flintlock",
-                            ["tec-9"] = "Tec-9",
+                            ["tazer"] = "Tazer", ["satchel_explosive"] = "Satchel",
+                            ["flintlock_pistol"] = "Flintlock", ["tec-9"] = "Tec-9",
                         }
                         if weaponAliases[weaponName] then
                             weaponName = weaponAliases[weaponName]
@@ -1068,141 +1130,15 @@ local function Update_DeviceChanger()
     end)
 end
 
--- ====================== CHARM EQUIPPER ======================
-local CharmsFolder = nil
-local CharmList = { 'None' }
-
-local function BuildCharmList()
-    pcall(function()
-        CharmsFolder = RepStorage:WaitForChild('Assets'):WaitForChild('Charms')
-        for _, charm in ipairs(CharmsFolder:GetChildren()) do
-            if charm:IsA('Folder') or charm:IsA('Model') then
-                table.insert(CharmList, charm.Name)
-            end
-        end
-    end)
-end
-
-task.delay(4, function()
-    BuildCharmList()
-end)
-
-local function EquipCharm(charmName)
-    if charmName == 'None' then return end
-    local char = LocalPlayer.Character
-    if not char then return end
-    if not CharmsFolder then return end
-
-    local charmFolder = CharmsFolder:FindFirstChild(charmName)
-    if not charmFolder then return end
-
-    local humanoid = char:FindFirstChildOfClass('Humanoid')
-    if not humanoid then return end
-
-    -- Apply Body Colors
-    local bodyColors = charmFolder:FindFirstChild('Body Colors')
-    if bodyColors and bodyColors:IsA('BodyColors') then
-        local existing = char:FindFirstChildOfClass('BodyColors')
-        if existing then existing:Destroy() end
-        local clone = bodyColors:Clone()
-        clone.Parent = char
-    end
-
-    -- Apply Shirt
-    local shirt = charmFolder:FindFirstChild('Shirt')
-    if shirt and shirt:IsA('Shirt') then
-        local existing = char:FindFirstChildOfClass('Shirt')
-        if existing then existing:Destroy() end
-        local clone = shirt:Clone()
-        clone.Parent = char
-    end
-
-    -- Apply Pants
-    local pants = charmFolder:FindFirstChild('Pants')
-    if pants and pants:IsA('Pants') then
-        local existing = char:FindFirstChildOfClass('Pants')
-        if existing then existing:Destroy() end
-        local clone = pants:Clone()
-        clone.Parent = char
-    end
-
-    -- Apply Accessories (multiple possible)
-    for _, child in ipairs(charmFolder:GetChildren()) do
-        if child:IsA('Accessory') then
-            local existing = char:FindFirstChild(child.Name)
-            if existing then existing:Destroy() end
-            local clone = child:Clone()
-            humanoid:AddAccessory(clone)
-        end
-    end
-end
-
-local function Update_CharmAutoRandom()
-    if not Charm_AutoRandom then return end
-    if #CharmList <= 1 then return end
-    local now = tick()
-    if now - Charm_LastRandom >= 5 then
-        local randomCharm = CharmList[math.random(2, #CharmList)]
-        if randomCharm and randomCharm ~= 'None' then
-            Charm_Selected = randomCharm
-            EquipCharm(randomCharm)
-        end
-        Charm_LastRandom = now
-    end
-end
-
--- ====================== SPRAY COLOR CHANGER ======================
-local function Update_SprayColor()
-    if not SC_Enabled then return end
-
-    pcall(function()
-        local sprayCans = RepStorage:WaitForChild('Assets'):WaitForChild('SprayCans')
-        for _, sprayCan in ipairs(sprayCans:GetChildren()) do
-            local model = sprayCan:FindFirstChild('model')
-            if model then
-                -- Change paint color
-                local paint = model:FindFirstChild('Top')
-                if paint then
-                    for _, child in ipairs(paint:GetChildren()) do
-                        if child:IsA('BasePart') and child.Name ~= 'Circle.004' and child.Name ~= 'Circle.005' then
-                            child.Color = SC_Color
-                        end
-                    end
-                end
-
-                -- Change WrapBone Changing part
-                local wrap = model:FindFirstChild('Wrap')
-                if wrap then
-                    local wrapBone = wrap:FindFirstChild('WrapBone')
-                    if wrapBone then
-                        local changing = wrapBone:FindFirstChild('Changing')
-                        if changing and changing:IsA('BasePart') then
-                            changing.Color = SC_Color
-                        end
-                        for _, child in ipairs(wrapBone:GetChildren()) do
-                            if child:IsA('BasePart') then
-                                child.Color = SC_Color
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
-
 -- ====================== RENDER LOOPS ======================
 RunService.RenderStepped:Connect(function()
     Update_ESP()
     Update_Aimbot()
     Update_FOV()
-    Update_NoRecoil()
     Update_BotESP()
     Update_Rainbow()
     Update_KillFeed()
     Update_DeviceChanger()
-    Update_CharmAutoRandom()
-    Update_SprayColor()
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -1216,20 +1152,40 @@ do
     local AimBox = CombatTab:AddLeftGroupbox('Aimbot')
     AimBox:AddToggle('Aimbot_Enabled', {
         Text = 'Aimbot', Default = false,
-        Tooltip = 'Uses CameraHandler.currentRotation',
+        Tooltip = 'Legit aimbot with speed system',
         Callback = function(v) Aimbot_Enabled = v end
     })
     AimBox:AddSlider('Aim_FOV', {
         Text = 'FOV', Default = 150, Min = 20, Max = 500, Rounding = 0, Suffix = 'px',
         Callback = function(v) Aim_FOV = v end
     })
-    AimBox:AddSlider('Aim_Smoothness', {
-        Text = 'Smoothness', Default = 3, Min = 1, Max = 20, Rounding = 1,
-        Callback = function(v) Aim_Smoothness = v end
+    AimBox:AddSlider('Aim_Speed', {
+        Text = 'Speed', Default = 0.3, Min = 0.1, Max = 5, Rounding = 2,
+        Tooltip = 'How fast the aimbot moves toward target',
+        Callback = function(v) Aim_Speed = v end
+    })
+    AimBox:AddSlider('Aim_SpeedInAttack', {
+        Text = 'Speed in Attack', Default = 0.15, Min = 0.1, Max = 5, Rounding = 2,
+        Tooltip = 'Speed when firing (lower = more legit)',
+        Callback = function(v) Aim_SpeedInAttack = v end
+    })
+    AimBox:AddSlider('Aim_SpeedScale', {
+        Text = 'Speed Scale', Default = 100, Min = 0, Max = 100, Rounding = 0, Suffix = '%',
+        Tooltip = 'Global speed multiplier',
+        Callback = function(v) Aim_SpeedScale = v end
+    })
+    AimBox:AddSlider('Aim_MaxLockOnTime', {
+        Text = 'Max Lock On Time', Default = 0, Min = 0, Max = 10, Rounding = 1, Suffix = 's',
+        Tooltip = 'Releases target after this time (0 = never)',
+        Callback = function(v) Aim_MaxLockOnTime = v end
+    })
+    AimBox:AddSlider('Aim_ReactionTime', {
+        Text = 'Reaction Time', Default = 0, Min = 0, Max = 500, Rounding = 0, Suffix = 'ms',
+        Tooltip = 'Delay before tracking new target',
+        Callback = function(v) Aim_ReactionTime = v end
     })
     AimBox:AddSlider('Aim_Distance', {
         Text = 'Max Distance', Default = 250, Min = 0, Max = 1000, Rounding = 0, Suffix = ' studs',
-        Tooltip = 'Only targets within this distance',
         Callback = function(v) Aim_Distance = v end
     })
     AimBox:AddDropdown('Aim_Part', {
@@ -1248,7 +1204,8 @@ do
         Callback = function(v) Aim_Visible_Check = v end
     })
     CheckBox:AddToggle('Team_Check', {
-        Text = 'Team Check', Default = false,
+        Text = 'Team Check (Game Internal)', Default = false,
+        Tooltip = 'Uses GameplayHandler team data, not Roblox teams',
         Callback = function(v) Team_Check = v end
     })
     CheckBox:AddDivider()
@@ -1264,25 +1221,6 @@ do
     CheckBox:AddLabel('FOV Color'):AddColorPicker('FOV_Color', {
         Default = Color3.fromRGB(255, 255, 255),
         Callback = function(v) FOV_Circle_Color = v end
-    })
-
-    -- NO RECOIL
-    local NRGroup = CombatTab:AddLeftGroupbox('Recoil Control')
-    NRGroup:AddToggle('NR_Enable', {
-        Text = 'No Recoil', Default = false,
-        Callback = function(v) NR_Enabled = v end
-    })
-    NRGroup:AddToggle('NR_Pitch', {
-        Text = 'Counter Pitch', Default = true,
-        Callback = function(v) NR_PitchLock = v end
-    })
-    NRGroup:AddToggle('NR_Yaw', {
-        Text = 'Counter Yaw', Default = false,
-        Callback = function(v) NR_YawLock = v end
-    })
-    NRGroup:AddSlider('NR_Intensity', {
-        Text = 'Counter Intensity', Default = 100, Min = 0, Max = 100, Rounding = 0, Suffix = '%',
-        Callback = function(v) NR_Intensity = v / 100 end
     })
 end
 
@@ -1344,29 +1282,20 @@ do
         Callback = function(v) Head_Dot_Color = v end
     })
 
-    -- GAME-AWARE ESP
     local GameAwareBox = VisualTab:AddLeftGroupbox('Game-Aware ESP')
     GameAwareBox:AddToggle('ESP_TeamColors', {
         Text = 'Team Colors (Blue/Orange)', Default = false,
-        Tooltip = 'Uses GameplayHandler team data',
         Callback = function(v) ESP_TeamColors = v end
     })
     GameAwareBox:AddToggle('ESP_MatchAware', {
         Text = 'Match State Labels', Default = false,
-        Tooltip = 'Shows IN MATCH / LOBBY / SPECTATING',
         Callback = function(v) ESP_MatchAware = v end
     })
     GameAwareBox:AddToggle('ESP_SpectateDetect', {
         Text = 'Spectate Detection', Default = false,
-        Tooltip = 'Shows who is spectating',
         Callback = function(v) ESP_SpectateDetect = v end
     })
-    GameAwareBox:AddDivider()
-    GameAwareBox:AddLabel('GameplayHandler: ' .. (GameplayHandler and 'Loaded' or 'Loading...'))
-    GameAwareBox:AddLabel('HitHandler: ' .. (HitHandler and 'Loaded' or 'Loading...'))
-    GameAwareBox:AddLabel('States: ' .. (States and 'Loaded' or 'Loading...'))
 
-    -- RAINBOW
     local RainbowGroup = VisualTab:AddLeftGroupbox('Rainbow')
     RainbowGroup:AddToggle('Rainbow_Enable', {
         Text = 'Rainbow Mode', Default = false,
@@ -1388,7 +1317,6 @@ do
         end
     })
 
-    -- BOT ESP
     local BotGroup = VisualTab:AddRightGroupbox('Bot Detection')
     BotGroup:AddToggle('BotESP_Enable', {
         Text = 'Bot ESP', Default = false,
@@ -1413,109 +1341,13 @@ do
     end)
 end
 
--- ====================== COSMETICS TAB ======================
-do
-    local CosmeticsTab = Tabs.Cosmetics
-
-    -- CHARM EQUIPPER
-    local CharmGroup = CosmeticsTab:AddLeftGroupbox('Charm Equipper')
-    local CharmDropdown = CharmGroup:AddDropdown('Charm_Select', {
-        Text = 'Select Charm',
-        Default = 'None',
-        Values = { 'None' },
-        Tooltip = 'Scans ReplicatedStorage.Assets.Charms folder',
-        Callback = function(v)
-            Charm_Selected = v
-            if v ~= 'None' then
-                EquipCharm(v)
-            end
-        end
-    })
-
-    -- Populate dropdown after charms load
-    task.delay(4.5, function()
-        if #CharmList > 1 then
-            CharmDropdown:SetValues(CharmList)
-        else
-            -- Try again
-            task.wait(2)
-            BuildCharmList()
-            if #CharmList > 1 then
-                CharmDropdown:SetValues(CharmList)
-            end
-        end
-    end)
-
-    CharmGroup:AddButton('Refresh Charm List', function()
-        BuildCharmList()
-        CharmDropdown:SetValues(CharmList)
-        CharmGroup:AddLabel('Found ' .. tostring(#CharmList - 1) .. ' charms')
-    end)
-
-    CharmGroup:AddButton('Equip Selected', function()
-        if Charm_Selected ~= 'None' then
-            EquipCharm(Charm_Selected)
-        end
-    end)
-
-    CharmGroup:AddButton('Random Charm', function()
-        if #CharmList > 1 then
-            local randomCharm = CharmList[math.random(2, #CharmList)]
-            Charm_Selected = randomCharm
-            CharmDropdown:SetValue(randomCharm)
-            EquipCharm(randomCharm)
-        end
-    end)
-
-    CharmGroup:AddToggle('Charm_AutoRandom', {
-        Text = 'Auto Random (every 5s)',
-        Default = false,
-        Callback = function(v) Charm_AutoRandom = v end
-    })
-
-    CharmGroup:AddDivider()
-    CharmGroup:AddLabel('Charms Found: ' .. tostring(#CharmList - 1))
-    CharmGroup:AddLabel('Folder: ' .. (CharmsFolder and 'Loaded' or 'Loading...'))
-
-    -- SPRAY COLOR CHANGER
-    local SprayGroup = CosmeticsTab:AddRightGroupbox('Spray Color Changer')
-    SprayGroup:AddToggle('SC_Enable', {
-        Text = 'Spray Color Changer',
-        Default = false,
-        Tooltip = 'Modifies spray can model colors',
-        Callback = function(v) SC_Enabled = v end
-    })
-    SprayGroup:AddLabel('Spray Color'):AddColorPicker('SC_Color', {
-        Default = Color3.fromRGB(255, 0, 0),
-        Callback = function(v) SC_Color = v end
-    })
-    SprayGroup:AddButton('Apply to All Spray Cans', function()
-        SC_Enabled = true
-        Update_SprayColor()
-        task.wait(0.1)
-        SC_Enabled = false
-    end)
-    SprayGroup:AddDivider()
-
-    -- Preset colors
-    SprayGroup:AddButton('Red', function() SC_Color = Color3.fromRGB(255, 0, 0) Update_SprayColor() end)
-    SprayGroup:AddButton('Green', function() SC_Color = Color3.fromRGB(0, 255, 0) Update_SprayColor() end)
-    SprayGroup:AddButton('Blue', function() SC_Color = Color3.fromRGB(0, 0, 255) Update_SprayColor() end)
-    SprayGroup:AddButton('Yellow', function() SC_Color = Color3.fromRGB(255, 255, 0) Update_SprayColor() end)
-    SprayGroup:AddButton('Purple', function() SC_Color = Color3.fromRGB(128, 0, 255) Update_SprayColor() end)
-    SprayGroup:AddButton('White', function() SC_Color = Color3.fromRGB(255, 255, 255) Update_SprayColor() end)
-    SprayGroup:AddButton('Black', function() SC_Color = Color3.fromRGB(0, 0, 0) Update_SprayColor() end)
-end
-
 -- ====================== MISC TAB ======================
 do
     local MiscTab = Tabs.Misc
 
-    -- CUSTOM KILL FEED
     local KFGroup = MiscTab:AddLeftGroupbox('Custom Kill Feed')
     KFGroup:AddToggle('KF_Enable', {
         Text = 'Custom Kill Feed', Default = false,
-        Tooltip = 'Listens to round_died packet',
         Callback = function(v) KF_Enabled = v end
     })
     KFGroup:AddSlider('KF_MaxEntries', {
@@ -1526,25 +1358,17 @@ do
         Text = 'Duration', Default = 5, Min = 1, Max = 15, Rounding = 0, Suffix = 's',
         Callback = function(v) KF_Duration = v end
     })
-    KFGroup:AddDivider()
-    KFGroup:AddLabel('Listener: ' .. (Neuron and 'Loading...' or 'Waiting...'))
 
-    -- DEVICE CHANGER
     local DCGroup = MiscTab:AddRightGroupbox('Device Changer')
     DCGroup:AddToggle('DC_Enable', {
         Text = 'Spoof Device', Default = false,
-        Tooltip = 'Changes your device icon in scoreboard',
         Callback = function(v) DC_Enabled = v end
     })
     DCGroup:AddDropdown('DC_Device', {
         Text = 'Device', Default = '1',
         Values = { '1', '2', 'default' },
-        Tooltip = '1 = Device 1, 2 = Device 2, default = Unknown',
         Callback = function(v) DC_Device = v end
     })
-    DCGroup:AddDivider()
-    DCGroup:AddLabel('DataHandler: ' .. (DataHandler and 'Loaded' or 'Loading...'))
-    DCGroup:AddLabel('Hook: ' .. (DC_Hooked and 'Active' or 'Inactive'))
 end
 
 -- ====================== SETTINGS TAB ======================
@@ -1582,7 +1406,7 @@ AdvancedBox:AddSlider('AnimSpeedSlider', { Text = 'Animation speed', Default = 1
 AdvancedBox:AddSlider('CornerRadiusSlider', { Text = 'Corner roundness', Default = 0, Min = 0, Max = 16, Rounding = 0, Suffix = 'px', Callback = function(v) Library:SetCornerRadius(v) end })
 AdvancedBox:AddToggle('BlurToggle', { Text = 'Blur background', Default = false, Callback = function(v) Library:SetBlurEnabled(v) end })
 AdvancedBox:AddLabel('Accent color'):AddColorPicker('AccentColorPicker', { Default = Color3.fromRGB(0, 85, 255), Callback = function(v) Library:SetAccentColor(v) end })
-AdvancedBox:AddSlider('FontScaleSlider', { Text = 'Font size', Default = 100, Min = 70, Max = 160, Rounding = 0, Suffix = '%', Callback = function(v) Library:SetFontScale(v / 100) end })
+AdvancedBox:AddSlider('FontScaleSlider', { Text = 'Font size', Default = 100, Min = 70, Max = 160, Rounding = 0, Suffix = '%', Callback = function(v) Window:SetFontScale(v / 100) end })
 AdvancedBox:AddLabel('Snap window to')
 AdvancedBox:AddButton({ Text = 'Top Left', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'TopLeft') end })
 AdvancedBox:AddButton({ Text = 'Top Right', Func = function() Library:SnapWindowTo(Library.WindowOuter, 'TopRight') end })

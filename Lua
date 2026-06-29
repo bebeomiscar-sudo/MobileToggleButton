@@ -1,7 +1,8 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║           COMPLETE UNIFIED SCRIPT v3 (ORIGINAL AIMBOT)                ║
--- ║  Aimbot reverted to original single-smoothness version               ║
--- ║  All other features + anti-kick fixes retained                       ║
+-- ║         COMPLETE UNIFIED SCRIPT v4 (HOOKFUNCTION + EVENT)             ║
+-- ║  Silent Aim: hookfunction on ShotRemote.FireServer (no namecall)     ║
+-- ║  Bullet Tracers: ShotRemote.OnClientEvent listener                   ║
+-- ║  Wall checks: Utils:raycast                                          ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 
 -- ====================== LOADER ======================
@@ -217,6 +218,7 @@ local SA_DeathCheck = true
 local SA_Prediction = true
 local SA_ProjectileSpeed = 2000
 local SA_Hooked = false
+local SA_HookMethod = 'None'
 
 -- ====================== NO RECOIL CONFIG ======================
 local NR_Enabled = false
@@ -272,6 +274,7 @@ local BT_Color = Color3.fromRGB(255, 220, 0)
 local BT_Duration = 0.4
 local BT_Thickness = 1.5
 local BT_Pool = {}
+local BT_ListenerSetup = false
 
 -- ====================== PARTICLE CONTROL CONFIG ======================
 local PC_Enabled = false
@@ -296,6 +299,7 @@ local function Is_Behind_Wall(part)
     return hit and hit:IsDescendantOf(part.Parent) == false
 end
 
+-- Wall check using Utils:raycast (the utility module)
 local function Is_Behind_Wall_Enhanced(part)
     local origin = Camera.CFrame.Position
     local direction = (part.Position - origin)
@@ -310,6 +314,7 @@ local function Is_Behind_Wall_Enhanced(part)
         return false
     end
 
+    -- Fallback if Utils hasn't loaded
     local ray = Ray.new(origin, direction)
     local hit = Workspace:FindPartOnRayWithIgnoreList(ray, { LocalPlayer.Character }, false, true)
     return hit and hit:IsDescendantOf(part.Parent) == false
@@ -353,7 +358,7 @@ local function Get_Health(player)
     return humanoid.Health / humanoid.MaxHealth
 end
 
--- ====================== DEATH CHECK (used by silent aim/triggerbot/hitbox) ======================
+-- ====================== DEATH CHECK ======================
 local function IsAlive(player)
     if not player then return false end
     resolve_player(player)
@@ -364,7 +369,7 @@ local function IsAlive(player)
     return humanoid.Health > 0
 end
 
--- ====================== AIM PREDICTION (used by silent aim) ======================
+-- ====================== AIM PREDICTION ======================
 local function GetPredictedPosition(targetPart, projectileSpeed)
     if not targetPart then return nil end
     local localChar = LocalPlayer.Character
@@ -533,7 +538,6 @@ local function Get_Closest_Target()
     return closest_player
 end
 
--- Aim using CameraHandler.currentRotation (works with custom camera + mobile)
 local function Aim_At_Target(player)
     if not player then return end
     local char = player.Character
@@ -554,7 +558,6 @@ local function Aim_At_Target(player)
     local currentPitch = currentRot.X
     local currentYaw = currentRot.Y
 
-    -- Yaw wraparound
     local deltaYaw = targetYaw - currentYaw
     if deltaYaw > math.pi then
         deltaYaw = deltaYaw - 2 * math.pi
@@ -625,7 +628,6 @@ local function Update_ESP()
         local box_x = root_pos.X - width / 2
         local box_y = head_pos.Y - head_size
 
-        -- Box
         if Box_Enabled and ESP_Enabled then
             d.Box_Outline.Position = v2_new(box_x, box_y)
             d.Box_Outline.Size = v2_new(width, height)
@@ -640,7 +642,6 @@ local function Update_ESP()
             d.Box_Fill.Visible = false
         end
 
-        -- Health
         if Health_Enabled and ESP_Enabled then
             local bar_x = box_x - 6
             d.Health_Bar_BG.From = v2_new(bar_x, box_y)
@@ -661,7 +662,6 @@ local function Update_ESP()
             d.Health_Bar.Visible = false
         end
 
-        -- Name
         if Name_Enabled and ESP_Enabled then
             d.Name_Text.Text = player.DisplayName
             d.Name_Text.Position = v2_new(root_pos.X, box_y - 14)
@@ -671,7 +671,6 @@ local function Update_ESP()
             d.Name_Text.Visible = false
         end
 
-        -- Distance
         if Distance_Enabled and ESP_Enabled then
             d.Distance_Text.Text = dist_str
             d.Distance_Text.Position = v2_new(root_pos.X, box_y + height + 4)
@@ -680,7 +679,6 @@ local function Update_ESP()
             d.Distance_Text.Visible = false
         end
 
-        -- Tracer
         if Tracer_Enabled and ESP_Enabled then
             local origin_x = screen_size.X / 2
             local origin_y = Tracer_Origin == 'Bottom' and screen_size.Y
@@ -695,7 +693,6 @@ local function Update_ESP()
             d.Tracer_Line.Visible = false
         end
 
-        -- Head Dot
         if Head_Dot_Enabled and ESP_Enabled then
             d.Head_Dot.Position = head_pos
             d.Head_Dot.Visible = true
@@ -757,6 +754,7 @@ local function Get_SilentAim_Target()
         if not char then continue end
         local target_part = Get_Nearest_Part(player, SA_TargetPart)
         if not target_part then continue end
+        -- Use Utils:raycast for wall check
         if SA_VisibleCheck and Is_Behind_Wall_Enhanced(target_part) then continue end
         local screen_pos, on_screen = World_To_Screen(target_part.Position)
         if not on_screen then continue end
@@ -769,82 +767,256 @@ local function Get_SilentAim_Target()
     return closest_player
 end
 
--- ====================== SHOT REMOTE HOOK (LAZY) ======================
+-- ====================== SHOT REMOTE HOOK (HOOKFUNCTION) ======================
+-- No hookmetamethod/__namecall — uses hookfunction on ShotRemote.FireServer
+-- Falls back to FireSystem function hook if hookfunction fails
 local function HookShotRemote()
     if SA_Hooked then return end
-    if not hookmetamethod then return end
     if not ShotRemote then return end
 
     local safeCC = newcclosure or function(f) return f end
 
-    local oldNamecall = hookmetamethod(game, "__namecall", safeCC(function(...)
-        local args = {...}
-        local self = args[1]
-        local method = getnamecallmethod()
+    -- Method 1: hookfunction on ShotRemote.FireServer
+    if hookfunction then
+        pcall(function()
+            local oldFire = hookfunction(ShotRemote.FireServer, safeCC(function(...)
+                local args = {...}
 
-        if not (self == ShotRemote) then
-            return oldNamecall(...)
-        end
+                if SA_Enabled then
+                    local target = Get_SilentAim_Target()
+                    if target then
+                        local targetPart = Get_Nearest_Part(target, SA_TargetPart)
+                        if targetPart then
+                            local hitPos = targetPart.Position
+                            if SA_Prediction then
+                                hitPos = GetPredictedPosition(targetPart, SA_ProjectileSpeed) or hitPos
+                            end
 
-        if method ~= "FireServer" and method ~= "fire" and method ~= "send" then
-            return oldNamecall(...)
-        end
-
-        local originalHitPos = nil
-        if type(args[2]) == "table" then
-            originalHitPos = args[2].position or args[2].hitPosition or args[2].Position
-        elseif typeof(args[2]) == "Vector3" then
-            originalHitPos = args[2]
-        elseif typeof(args[3]) == "Vector3" then
-            originalHitPos = args[3]
-        end
-
-        if BT_Enabled and originalHitPos then
-            local muzzlePos = Camera.CFrame.Position
-            local screenFrom, visFrom = World_To_Screen(muzzlePos)
-            local screenTo, visTo = World_To_Screen(originalHitPos)
-            if visFrom and visTo then
-                local line = Drawing.new('Line')
-                line.Visible = true
-                line.From = screenFrom
-                line.To = screenTo
-                line.Color = BT_Color
-                line.Thickness = BT_Thickness
-                line.Transparency = 0.2
-                table.insert(BT_Pool, {drawing = line, expire = tick() + BT_Duration, duration = BT_Duration})
-            end
-        end
-
-        if SA_Enabled then
-            local target = Get_SilentAim_Target()
-            if target then
-                local targetPart = Get_Nearest_Part(target, SA_TargetPart)
-                if targetPart then
-                    local hitPos = targetPart.Position
-                    if SA_Prediction then
-                        hitPos = GetPredictedPosition(targetPart, SA_ProjectileSpeed) or hitPos
-                    end
-
-                    if type(args[2]) == "table" then
-                        if args[2].position then args[2].position = hitPos end
-                        if args[2].hitPosition then args[2].hitPosition = hitPos end
-                        if args[2].Position then args[2].Position = hitPos end
-                        if args[2].target then args[2].target = targetPart end
-                        if args[2].hitPart then args[2].hitPart = targetPart end
-                    elseif typeof(args[2]) == "Vector3" then
-                        args[2] = hitPos
-                    elseif typeof(args[3]) == "Vector3" then
-                        args[3] = hitPos
+                            if type(args[2]) == "table" then
+                                if args[2].position then args[2].position = hitPos end
+                                if args[2].hitPosition then args[2].hitPosition = hitPos end
+                                if args[2].Position then args[2].Position = hitPos end
+                                if args[2].target then args[2].target = targetPart end
+                                if args[2].hitPart then args[2].hitPart = targetPart end
+                            elseif typeof(args[2]) == "Vector3" then
+                                args[2] = hitPos
+                            elseif typeof(args[3]) == "Vector3" then
+                                args[3] = hitPos
+                            end
+                        end
                     end
                 end
+
+                return oldFire(table.unpack(args))
+            end))
+            SA_Hooked = true
+            SA_HookMethod = 'hookfunction'
+        end)
+    end
+
+    -- Method 2: Hook FireSystem's fire function (fallback)
+    if not SA_Hooked and WeaponSystems.FireSystem then
+        for k, v in pairs(WeaponSystems.FireSystem) do
+            if type(v) == "function" and (k:lower():match("fire") or k:lower():match("shoot")) then
+                pcall(function()
+                    local oldFunc = WeaponSystems.FireSystem[k]
+                    WeaponSystems.FireSystem[k] = safeCC(function(...)
+                        local args = {...}
+
+                        if SA_Enabled then
+                            local target = Get_SilentAim_Target()
+                            if target then
+                                local targetPart = Get_Nearest_Part(target, SA_TargetPart)
+                                if targetPart then
+                                    local hitPos = targetPart.Position
+                                    if SA_Prediction then
+                                        hitPos = GetPredictedPosition(targetPart, SA_ProjectileSpeed) or hitPos
+                                    end
+
+                                    if type(args[2]) == "table" then
+                                        if args[2].position then args[2].position = hitPos end
+                                        if args[2].hitPosition then args[2].hitPosition = hitPos end
+                                        if args[2].Position then args[2].Position = hitPos end
+                                        if args[2].target then args[2].target = targetPart end
+                                        if args[2].hitPart then args[2].hitPart = targetPart end
+                                    elseif typeof(args[2]) == "Vector3" then
+                                        args[2] = hitPos
+                                    elseif typeof(args[3]) == "Vector3" then
+                                        args[3] = hitPos
+                                    end
+                                end
+                            end
+                        end
+
+                        return oldFunc(table.unpack(args))
+                    end)
+                    SA_Hooked = true
+                    SA_HookMethod = 'FireSystem.' .. k
+                end)
+                if SA_Hooked then break end
             end
         end
-
-        return oldNamecall(table.unpack(args))
-    end))
-
-    SA_Hooked = true
+    end
 end
+
+-- ====================== BULLET TRACER LISTENER (OnClientEvent) ======================
+-- Listens to ShotRemote.OnClientEvent for server-broadcast shot data
+-- Draws tracers based on the shot packet data
+local function SetupBulletListener()
+    if BT_ListenerSetup then return end
+    if not ShotRemote then return end
+
+    -- Try RemoteEvent listener
+    pcall(function()
+        if ShotRemote:IsA('RemoteEvent') then
+            ShotRemote.OnClientEvent:Connect(function(...)
+                if not BT_Enabled then return end
+
+                local args = {...}
+                local originPos = nil
+                local hitPos = nil
+
+                -- Parse various possible data structures
+                if type(args[1]) == "table" then
+                    originPos = args[1].origin or args[1].startPos or args[1].from or args[1].muzzle
+                    hitPos = args[1].hitPosition or args[1].hit or args[1].endPos or args[1].position or args[1].destination
+                elseif type(args[2]) == "table" then
+                    originPos = args[2].origin or args[2].startPos or args[2].from
+                    hitPos = args[2].hitPosition or args[2].hit or args[2].endPos or args[2].position
+                elseif typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
+                    originPos = args[1]
+                    hitPos = args[2]
+                elseif typeof(args[1]) == "Vector3" then
+                    hitPos = args[1]
+                elseif typeof(args[2]) == "Vector3" then
+                    hitPos = args[2]
+                end
+
+                if hitPos then
+                    local drawFrom = originPos or Camera.CFrame.Position
+                    local screenFrom, visFrom = World_To_Screen(drawFrom)
+                    local screenTo, visTo = World_To_Screen(hitPos)
+                    if visFrom and visTo then
+                        local line = Drawing.new('Line')
+                        line.Visible = true
+                        line.From = screenFrom
+                        line.To = screenTo
+                        line.Color = BT_Color
+                        line.Thickness = BT_Thickness
+                        line.Transparency = 0.2
+                        table.insert(BT_Pool, {
+                            drawing = line,
+                            expire = tick() + BT_Duration,
+                            duration = BT_Duration
+                        })
+                    end
+                end
+            end)
+            BT_ListenerSetup = true
+        end
+    end)
+
+    -- Try RemoteFunction listener
+    if not BT_ListenerSetup then
+        pcall(function()
+            if ShotRemote:IsA('RemoteFunction') then
+                local oldInvoke = ShotRemote.OnClientInvoke
+                ShotRemote.OnClientInvoke = function(...)
+                    local args = {...}
+
+                    if BT_Enabled then
+                        local originPos = nil
+                        local hitPos = nil
+
+                        if type(args[1]) == "table" then
+                            originPos = args[1].origin or args[1].startPos or args[1].from
+                            hitPos = args[1].hitPosition or args[1].hit or args[1].endPos or args[1].position
+                        elseif typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
+                            originPos = args[1]
+                            hitPos = args[2]
+                        elseif typeof(args[1]) == "Vector3" then
+                            hitPos = args[1]
+                        end
+
+                        if hitPos then
+                            local drawFrom = originPos or Camera.CFrame.Position
+                            local screenFrom, visFrom = World_To_Screen(drawFrom)
+                            local screenTo, visTo = World_To_Screen(hitPos)
+                            if visFrom and visTo then
+                                local line = Drawing.new('Line')
+                                line.Visible = true
+                                line.From = screenFrom
+                                line.To = screenTo
+                                line.Color = BT_Color
+                                line.Thickness = BT_Thickness
+                                line.Transparency = 0.2
+                                table.insert(BT_Pool, {
+                                    drawing = line,
+                                    expire = tick() + BT_Duration,
+                                    duration = BT_Duration
+                                })
+                            end
+                        end
+                    end
+
+                    if oldInvoke then
+                        return oldInvoke(...)
+                    end
+                end
+                BT_ListenerSetup = true
+            end
+        end)
+    end
+
+    -- Generic fallback — try connecting regardless of type
+    if not BT_ListenerSetup then
+        pcall(function()
+            ShotRemote.OnClientEvent:Connect(function(...)
+                if not BT_Enabled then return end
+
+                local args = {...}
+                local originPos = nil
+                local hitPos = nil
+
+                if type(args[1]) == "table" then
+                    originPos = args[1].origin or args[1].startPos or args[1].from
+                    hitPos = args[1].hitPosition or args[1].hit or args[1].endPos or args[1].position
+                elseif typeof(args[1]) == "Vector3" and typeof(args[2]) == "Vector3" then
+                    originPos = args[1]
+                    hitPos = args[2]
+                elseif typeof(args[1]) == "Vector3" then
+                    hitPos = args[1]
+                end
+
+                if hitPos then
+                    local drawFrom = originPos or Camera.CFrame.Position
+                    local screenFrom, visFrom = World_To_Screen(drawFrom)
+                    local screenTo, visTo = World_To_Screen(hitPos)
+                    if visFrom and visTo then
+                        local line = Drawing.new('Line')
+                        line.Visible = true
+                        line.From = screenFrom
+                        line.To = screenTo
+                        line.Color = BT_Color
+                        line.Thickness = BT_Thickness
+                        line.Transparency = 0.2
+                        table.insert(BT_Pool, {
+                            drawing = line,
+                            expire = tick() + BT_Duration,
+                            duration = BT_Duration
+                        })
+                    end
+                end
+            end)
+            BT_ListenerSetup = true
+        end)
+    end
+end
+
+-- Setup bullet listener after ShotRemote loads
+task.delay(4, function()
+    SetupBulletListener()
+end)
 
 -- ====================== TRIGGERBOT LOGIC (SAFER) ======================
 local TB_LastFire = 0
@@ -1102,7 +1274,7 @@ local function Update_FullAuto()
     end
 end
 
--- ====================== BULLET TRACER LOGIC ======================
+-- ====================== BULLET TRACER FADE LOGIC ======================
 local function Update_BulletTracers()
     local now = tick()
     for i = #BT_Pool, 1, -1 do
@@ -1243,7 +1415,7 @@ do
     SAGroup:AddToggle('SA_Enable', {
         Text = 'Silent Aim',
         Default = false,
-        Tooltip = 'Redirects shot packets to nearest target',
+        Tooltip = 'Redirects shot packets via hookfunction',
         Callback = function(v)
             SA_Enabled = v
             if v and not SA_Hooked then
@@ -1275,7 +1447,7 @@ do
     })
 
     SAGroup:AddToggle('SA_Visible', {
-        Text = 'Visible Check',
+        Text = 'Visible Check (Utils:raycast)',
         Default = true,
         Callback = function(v) SA_VisibleCheck = v end
     })
@@ -1305,8 +1477,9 @@ do
     })
 
     SAGroup:AddDivider()
-    SAGroup:AddLabel('Hook: ' .. (SA_Hooked and 'Active' or 'Inactive'))
+    SAGroup:AddLabel('Hook: ' .. (SA_Hooked and SA_HookMethod or 'Inactive'))
     SAGroup:AddLabel('Remote: ' .. (ShotRemote and 'Found' or 'Loading...'))
+    SAGroup:AddLabel('Wall Check: ' .. (Utils and 'Utils:raycast' or 'Fallback'))
 
     -- TRIGGERBOT
     local TBGroup = CombatTab:AddLeftGroupbox('Triggerbot')
@@ -1560,13 +1733,13 @@ do
         end
     })
 
-    -- BULLET TRACERS
+    -- BULLET TRACERS (via shot remote OnClientEvent)
     local BTGroup = VisualTab:AddLeftGroupbox('Bullet Tracers')
 
     BTGroup:AddToggle('BT_Enable', {
         Text = 'Bullet Tracers',
         Default = false,
-        Tooltip = 'Draws fire lines from muzzle to hit point',
+        Tooltip = 'Listens to shot remote OnClientEvent',
         Callback = function(v) BT_Enabled = v end
     })
 
@@ -1586,6 +1759,9 @@ do
         Default = 1.5, Min = 0.5, Max = 5, Rounding = 1,
         Callback = function(v) BT_Thickness = v end
     })
+
+    BTGroup:AddDivider()
+    BTGroup:AddLabel('Listener: ' .. (BT_ListenerSetup and 'OnClientEvent' or 'Waiting...'))
 
     -- PERFORMANCE
     local PCGroup = VisualTab:AddLeftGroupbox('Performance')

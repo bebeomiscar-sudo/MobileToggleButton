@@ -1,9 +1,9 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║              COMPLETE UNIFIED SCRIPT v5 (GAME INTERNAL)               ║
--- ║  Features: Aimbot+DeathCheck, ESP+TeamColors+MatchAware+Spectate,    ║
--- ║  SilentAim(Utils), Triggerbot, NoRecoil, BotESP, Rainbow,            ║
--- ║  CustomKillFeed, DeviceChanger                                       ║
--- ║  Removed: BulletTracers, FullAuto, HitboxExpander (broken)           ║
+-- ║              COMPLETE UNIFIED SCRIPT v6 (CLEAN + COSMETICS)           ║
+-- ║  Features: Aimbot+DeathCheck+Distance, ESP+TeamColors+MatchAware,    ║
+-- ║  NoRecoil, BotESP, Rainbow, CustomKillFeed, DeviceChanger,           ║
+-- ║  CharmEquipper, SprayColorChanger                                     ║
+-- ║  Removed: Triggerbot, Silent Aim, BulletTracers, FullAuto, Hitbox    ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 
 -- ====================== LOADER ======================
@@ -58,6 +58,7 @@ local Window = Library:CreateWindow({
 local Tabs = {
     Combat = Window:AddTab('Combat'),
     Visual = Window:AddTab('Visual'),
+    Cosmetics = Window:AddTab('Cosmetics'),
     Misc = Window:AddTab('Misc'),
     ['UI Settings'] = Window:AddTab('Settings'),
 }
@@ -113,7 +114,6 @@ local Utils = nil
 local VFXUtility = nil
 local WeaponECS = nil
 local TableUtils = nil
-local ShotRemote = nil
 local WeaponSystems = {}
 local GameplayHandler = nil
 local HitHandler = nil
@@ -137,8 +137,6 @@ task.delay(3, function()
     pcall(function() WeaponECS = require(RepStorage:WaitForChild('Modules'):WaitForChild('WeaponECS')) end)
     task.wait(0.3)
     pcall(function() TableUtils = require(RepStorage:WaitForChild('Modules'):WaitForChild('TableUtils')) end)
-    task.wait(0.3)
-    pcall(function() ShotRemote = RepStorage:WaitForChild('Remotes'):WaitForChild('shot') end)
     task.wait(0.3)
     pcall(function()
         local ecsFolder = RepStorage:WaitForChild('Modules'):WaitForChild('WeaponECS')
@@ -171,6 +169,7 @@ local Aim_Part = 'Head'
 local Aim_Visible_Check = true
 local Team_Check = false
 local Aim_DeathCheck = true
+local Aim_Distance = 250
 local FOV_Circle_Enabled = true
 local FOV_Circle_Color = Color3.fromRGB(255, 255, 255)
 local FOV_Circle_Transparency = 0.7
@@ -192,27 +191,6 @@ local Head_Dot_Color = Color3.fromRGB(255, 0, 0)
 local ESP_TeamColors = false
 local ESP_MatchAware = false
 local ESP_SpectateDetect = false
-
--- TRIGGERBOT
-local TB_Enabled = false
-local TB_FOV = 60
-local TB_Delay = 0.05
-local TB_TeamCheck = true
-local TB_VisibleCheck = true
-local TB_TargetPart = 'Torso'
-local TB_DeathCheck = true
-
--- SILENT AIM
-local SA_Enabled = false
-local SA_FOV = 300
-local SA_TargetPart = 'Head'
-local SA_VisibleCheck = true
-local SA_TeamCheck = false
-local SA_DeathCheck = true
-local SA_Prediction = true
-local SA_ProjectileSpeed = 2000
-local SA_Hooked = false
-local SA_HookMethod = 'None'
 
 -- NO RECOIL
 local NR_Enabled = false
@@ -257,6 +235,16 @@ local KF_Pool = {}
 -- DEVICE CHANGER
 local DC_Enabled = false
 local DC_Device = '1'
+local DC_Hooked = false
+
+-- CHARM EQUIPPER
+local Charm_Selected = 'None'
+local Charm_AutoRandom = false
+local Charm_LastRandom = 0
+
+-- SPRAY COLOR CHANGER
+local SC_Enabled = false
+local SC_Color = Color3.fromRGB(255, 0, 0)
 
 -- ====================== DRAWING HELPERS ======================
 local v2_new = Vector2.new
@@ -289,23 +277,6 @@ local function IsAlive(player)
     local humanoid = char:FindFirstChildOfClass('Humanoid')
     if not humanoid then return false end
     return humanoid.Health > 0
-end
-
--- ====================== AIM PREDICTION ======================
-local function GetPredictedPosition(targetPart, projectileSpeed)
-    if not targetPart then return nil end
-    local localChar = LocalPlayer.Character
-    if not localChar then return targetPart.Position end
-    local localRoot = localChar:FindFirstChild('HumanoidRootPart')
-    if not localRoot then return targetPart.Position end
-
-    local targetPos = targetPart.Position
-    local targetVel = targetPart.AssemblyLinearVelocity
-    local distance = (targetPos - localRoot.Position).Magnitude
-
-    if projectileSpeed <= 0 or distance <= 0 then return targetPos end
-    local timeToHit = distance / projectileSpeed
-    return targetPos + (targetVel * timeToHit)
 end
 
 -- ====================== GAMEPLAY DATA HELPERS ======================
@@ -374,47 +345,6 @@ local function Is_Behind_Wall(part)
     local ray = Ray.new(origin, direction)
     local hit = Workspace:FindPartOnRayWithIgnoreList(ray, { LocalPlayer.Character }, false, true)
     return hit and hit:IsDescendantOf(part.Parent) == false
-end
-
--- ====================== SILENT AIM WALL CHECK (UTILS ONLY) ======================
-local function SA_IsVisible(targetPart)
-    if not SA_VisibleCheck then return true end
-    local origin = Camera.CFrame.Position
-    local direction = (targetPart.Position - origin)
-
-    if Utils and Utils.raycast then
-        local params = Utils.defaultParams or RaycastParams.new()
-        params.FilterDescendantsInstances = { LocalPlayer.Character }
-        local result = Utils:raycast(origin, direction, params, nil, true)
-        if result and result.Instance then
-            return result.Instance:IsDescendantOf(targetPart.Parent)
-        end
-        return true
-    end
-
-    return true
-end
-
--- ====================== SILENT AIM HIT POSITION (UTILS RAYCAST) ======================
-local function GetSilentAimHitPosition(targetPart)
-    local camPos = Camera.CFrame.Position
-    local targetPos = targetPart.Position
-
-    if SA_Prediction then
-        targetPos = GetPredictedPosition(targetPart, SA_ProjectileSpeed) or targetPos
-    end
-
-    if Utils and Utils.raycast then
-        local direction = (targetPos - camPos)
-        local params = Utils.defaultParams or RaycastParams.new()
-        params.FilterDescendantsInstances = { LocalPlayer.Character }
-        local result = Utils:raycast(camPos, direction, params, nil, true)
-        if result and result.Position then
-            return result.Position
-        end
-    end
-
-    return targetPos
 end
 
 -- ====================== PART FINDER ======================
@@ -589,6 +519,11 @@ local function Get_Closest_Target()
         if not char then continue end
         local target_part = Get_Nearest_Part(player, Aim_Part)
         if not target_part then continue end
+
+        -- Distance check
+        local target_distance = Get_Distance(player)
+        if target_distance > Aim_Distance then continue end
+
         if Aim_Visible_Check and Is_Behind_Wall(target_part) then continue end
         local screen_pos, on_screen = World_To_Screen(target_part.Position)
         if not on_screen then continue end
@@ -675,7 +610,6 @@ local function Update_ESP()
         local distance = Get_Distance(player)
         local dist_str = tostring(math_floor(distance)) .. 'm'
 
-        -- Team color override
         local effective_box_color = Box_Color
         local effective_name_color = Name_Color
         local effective_tracer_color = Tracer_Color
@@ -746,7 +680,6 @@ local function Update_ESP()
             d.Distance_Text.Visible = false
         end
 
-        -- Match-aware / Spectate status text
         if ESP_MatchAware or ESP_SpectateDetect then
             local status_parts = {}
             if ESP_MatchAware then
@@ -823,152 +756,6 @@ local function Update_FOV()
         FOV_Drawing.Transparency = 0.3
     end
     FOV_Drawing.Visible = true
-end
-
--- ====================== SILENT AIM (UTILS ONLY) ======================
-local function Get_SilentAim_Target()
-    local closest_player = nil
-    local closest_distance = SA_FOV
-    local screen_center = v2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if SA_TeamCheck and player.Team == LocalPlayer.Team then continue end
-        if SA_DeathCheck and not IsAlive(player) then continue end
-        resolve_player(player)
-        local char = player.Character
-        if not char then continue end
-        local target_part = Get_Nearest_Part(player, SA_TargetPart)
-        if not target_part then continue end
-        if not SA_IsVisible(target_part) then continue end
-        local screen_pos, on_screen = World_To_Screen(target_part.Position)
-        if not on_screen then continue end
-        local dist = (screen_pos - screen_center).Magnitude
-        if dist < closest_distance then
-            closest_distance = dist
-            closest_player = player
-        end
-    end
-    return closest_player
-end
-
--- ====================== SHOT REMOTE HOOK (HOOKFUNCTION) ======================
-local function HookShotRemote()
-    if SA_Hooked then return end
-    if not ShotRemote then return end
-    if not hookfunction then return end
-
-    local safeCC = newcclosure or function(f) return f end
-
-    pcall(function()
-        local oldFire = hookfunction(ShotRemote.FireServer, safeCC(function(...)
-            local args = {...}
-
-            if SA_Enabled then
-                local target = Get_SilentAim_Target()
-                if target then
-                    local targetPart = Get_Nearest_Part(target, SA_TargetPart)
-                    if targetPart then
-                        local hitPos = GetSilentAimHitPosition(targetPart)
-
-                        if type(args[2]) == "table" then
-                            if args[2].position then args[2].position = hitPos end
-                            if args[2].hitPosition then args[2].hitPosition = hitPos end
-                            if args[2].Position then args[2].Position = hitPos end
-                            if args[2].target then args[2].target = targetPart end
-                            if args[2].hitPart then args[2].hitPart = targetPart end
-                        elseif typeof(args[2]) == "Vector3" then
-                            args[2] = hitPos
-                        elseif typeof(args[3]) == "Vector3" then
-                            args[3] = hitPos
-                        end
-                    end
-                end
-            end
-
-            return oldFire(table.unpack(args))
-        end))
-        SA_Hooked = true
-        SA_HookMethod = 'hookfunction'
-    end)
-
-    if not SA_Hooked and WeaponSystems.FireSystem then
-        for k, v in pairs(WeaponSystems.FireSystem) do
-            if type(v) == "function" and (k:lower():match("fire") or k:lower():match("shoot")) then
-                pcall(function()
-                    local oldFunc = WeaponSystems.FireSystem[k]
-                    WeaponSystems.FireSystem[k] = safeCC(function(...)
-                        local args = {...}
-                        if SA_Enabled then
-                            local target = Get_SilentAim_Target()
-                            if target then
-                                local targetPart = Get_Nearest_Part(target, SA_TargetPart)
-                                if targetPart then
-                                    local hitPos = GetSilentAimHitPosition(targetPart)
-                                    if type(args[2]) == "table" then
-                                        if args[2].position then args[2].position = hitPos end
-                                        if args[2].hitPosition then args[2].hitPosition = hitPos end
-                                        if args[2].Position then args[2].Position = hitPos end
-                                        if args[2].target then args[2].target = targetPart end
-                                        if args[2].hitPart then args[2].hitPart = targetPart end
-                                    elseif typeof(args[2]) == "Vector3" then
-                                        args[2] = hitPos
-                                    elseif typeof(args[3]) == "Vector3" then
-                                        args[3] = hitPos
-                                    end
-                                end
-                            end
-                        end
-                        return oldFunc(table.unpack(args))
-                    end)
-                    SA_Hooked = true
-                    SA_HookMethod = 'FireSystem.' .. k
-                end)
-                if SA_Hooked then break end
-            end
-        end
-    end
-end
-
--- ====================== TRIGGERBOT ======================
-local TB_LastFire = 0
-
-local function Update_Triggerbot()
-    if not TB_Enabled then return end
-    local now = tick()
-    if now - TB_LastFire < TB_Delay then return end
-
-    local screen_center = v2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local closest_dist = TB_FOV
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if TB_TeamCheck and player.Team == LocalPlayer.Team then continue end
-        if TB_DeathCheck and not IsAlive(player) then continue end
-        resolve_player(player)
-        local char = player.Character
-        if not char then continue end
-        local target_part = Get_Nearest_Part(player, TB_TargetPart)
-        if not target_part then continue end
-        if TB_VisibleCheck and not SA_IsVisible(target_part) then continue end
-        local screen_pos, on_screen = World_To_Screen(target_part.Position)
-        if not on_screen then continue end
-        local dist = (screen_pos - screen_center).Magnitude
-        if dist < closest_dist then
-            closest_dist = dist
-            pcall(function()
-                if mouse1click then
-                    mouse1click()
-                elseif vim then
-                    vim:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-                    task.wait(0.01)
-                    vim:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-                end
-            end)
-            TB_LastFire = now
-            break
-        end
-    end
 end
 
 -- ====================== NO RECOIL ======================
@@ -1235,44 +1022,6 @@ local function Update_KillFeed()
 end
 
 -- ====================== DEVICE CHANGER ======================
-local function Update_DeviceChanger()
-    if not DC_Enabled then return end
-    if not GameplayHandler then return end
-
-    -- Try to modify the device icon in the UI
-    pcall(function()
-        if GameplayHandler.playerFrame then
-            local deviceFrame = GameplayHandler.playerFrame:FindFirstChild("Device")
-            if deviceFrame then
-                local icon = deviceFrame:FindFirstChild("Icon")
-                if icon and icon:IsA("ImageLabel") then
-                    local deviceOffsets = {
-                        ["1"] = { Vector2.new(104, 154), Vector2.new(48, 72) },
-                        ["2"] = { Vector2.new(166, 154), Vector2.new(102, 72) },
-                        ["default"] = { Vector2.new(0, 154), Vector2.new(90, 72) }
-                    }
-                    local offset = deviceOffsets[DC_Device] or deviceOffsets["default"]
-                    icon.ImageRectOffset = offset[1]
-                    icon.ImageRectSize = offset[2]
-                end
-            end
-        end
-    end)
-
-    -- Also try hooking DataHandler
-    if DataHandler and DataHandler.GetDataAsync then
-        local original = DataHandler.GetDataAsync
-        DataHandler.GetDataAsync = function(self, player, ...)
-            local result = original(self, player, ...)
-            if player == LocalPlayer and DC_Enabled and result then
-                result.Device = DC_Device == "default" and nil or tonumber(DC_Device)
-            end
-            return result
-        end
-    end
-end
-
-local DC_Hooked = false
 local function TryHookDataHandler()
     if DC_Hooked then return end
     if not DataHandler then return end
@@ -1295,17 +1044,165 @@ task.delay(4.5, function()
     TryHookDataHandler()
 end)
 
+local function Update_DeviceChanger()
+    if not DC_Enabled then return end
+    if not GameplayHandler then return end
+
+    pcall(function()
+        if GameplayHandler.playerFrame then
+            local deviceFrame = GameplayHandler.playerFrame:FindFirstChild("Device")
+            if deviceFrame then
+                local icon = deviceFrame:FindFirstChild("Icon")
+                if icon and icon:IsA("ImageLabel") then
+                    local deviceOffsets = {
+                        ["1"] = { Vector2.new(104, 154), Vector2.new(48, 72) },
+                        ["2"] = { Vector2.new(166, 154), Vector2.new(102, 72) },
+                        ["default"] = { Vector2.new(0, 154), Vector2.new(90, 72) }
+                    }
+                    local offset = deviceOffsets[DC_Device] or deviceOffsets["default"]
+                    icon.ImageRectOffset = offset[1]
+                    icon.ImageRectSize = offset[2]
+                end
+            end
+        end
+    end)
+end
+
+-- ====================== CHARM EQUIPPER ======================
+local CharmsFolder = nil
+local CharmList = { 'None' }
+
+local function BuildCharmList()
+    pcall(function()
+        CharmsFolder = RepStorage:WaitForChild('Assets'):WaitForChild('Charms')
+        for _, charm in ipairs(CharmsFolder:GetChildren()) do
+            if charm:IsA('Folder') or charm:IsA('Model') then
+                table.insert(CharmList, charm.Name)
+            end
+        end
+    end)
+end
+
+task.delay(4, function()
+    BuildCharmList()
+end)
+
+local function EquipCharm(charmName)
+    if charmName == 'None' then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    if not CharmsFolder then return end
+
+    local charmFolder = CharmsFolder:FindFirstChild(charmName)
+    if not charmFolder then return end
+
+    local humanoid = char:FindFirstChildOfClass('Humanoid')
+    if not humanoid then return end
+
+    -- Apply Body Colors
+    local bodyColors = charmFolder:FindFirstChild('Body Colors')
+    if bodyColors and bodyColors:IsA('BodyColors') then
+        local existing = char:FindFirstChildOfClass('BodyColors')
+        if existing then existing:Destroy() end
+        local clone = bodyColors:Clone()
+        clone.Parent = char
+    end
+
+    -- Apply Shirt
+    local shirt = charmFolder:FindFirstChild('Shirt')
+    if shirt and shirt:IsA('Shirt') then
+        local existing = char:FindFirstChildOfClass('Shirt')
+        if existing then existing:Destroy() end
+        local clone = shirt:Clone()
+        clone.Parent = char
+    end
+
+    -- Apply Pants
+    local pants = charmFolder:FindFirstChild('Pants')
+    if pants and pants:IsA('Pants') then
+        local existing = char:FindFirstChildOfClass('Pants')
+        if existing then existing:Destroy() end
+        local clone = pants:Clone()
+        clone.Parent = char
+    end
+
+    -- Apply Accessories (multiple possible)
+    for _, child in ipairs(charmFolder:GetChildren()) do
+        if child:IsA('Accessory') then
+            local existing = char:FindFirstChild(child.Name)
+            if existing then existing:Destroy() end
+            local clone = child:Clone()
+            humanoid:AddAccessory(clone)
+        end
+    end
+end
+
+local function Update_CharmAutoRandom()
+    if not Charm_AutoRandom then return end
+    if #CharmList <= 1 then return end
+    local now = tick()
+    if now - Charm_LastRandom >= 5 then
+        local randomCharm = CharmList[math.random(2, #CharmList)]
+        if randomCharm and randomCharm ~= 'None' then
+            Charm_Selected = randomCharm
+            EquipCharm(randomCharm)
+        end
+        Charm_LastRandom = now
+    end
+end
+
+-- ====================== SPRAY COLOR CHANGER ======================
+local function Update_SprayColor()
+    if not SC_Enabled then return end
+
+    pcall(function()
+        local sprayCans = RepStorage:WaitForChild('Assets'):WaitForChild('SprayCans')
+        for _, sprayCan in ipairs(sprayCans:GetChildren()) do
+            local model = sprayCan:FindFirstChild('model')
+            if model then
+                -- Change paint color
+                local paint = model:FindFirstChild('Top')
+                if paint then
+                    for _, child in ipairs(paint:GetChildren()) do
+                        if child:IsA('BasePart') and child.Name ~= 'Circle.004' and child.Name ~= 'Circle.005' then
+                            child.Color = SC_Color
+                        end
+                    end
+                end
+
+                -- Change WrapBone Changing part
+                local wrap = model:FindFirstChild('Wrap')
+                if wrap then
+                    local wrapBone = wrap:FindFirstChild('WrapBone')
+                    if wrapBone then
+                        local changing = wrapBone:FindFirstChild('Changing')
+                        if changing and changing:IsA('BasePart') then
+                            changing.Color = SC_Color
+                        end
+                        for _, child in ipairs(wrapBone:GetChildren()) do
+                            if child:IsA('BasePart') then
+                                child.Color = SC_Color
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
 -- ====================== RENDER LOOPS ======================
 RunService.RenderStepped:Connect(function()
     Update_ESP()
     Update_Aimbot()
     Update_FOV()
-    Update_Triggerbot()
     Update_NoRecoil()
     Update_BotESP()
     Update_Rainbow()
     Update_KillFeed()
     Update_DeviceChanger()
+    Update_CharmAutoRandom()
+    Update_SprayColor()
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -1329,6 +1226,11 @@ do
     AimBox:AddSlider('Aim_Smoothness', {
         Text = 'Smoothness', Default = 3, Min = 1, Max = 20, Rounding = 1,
         Callback = function(v) Aim_Smoothness = v end
+    })
+    AimBox:AddSlider('Aim_Distance', {
+        Text = 'Max Distance', Default = 250, Min = 0, Max = 1000, Rounding = 0, Suffix = ' studs',
+        Tooltip = 'Only targets within this distance',
+        Callback = function(v) Aim_Distance = v end
     })
     AimBox:AddDropdown('Aim_Part', {
         Text = 'Aim Part', Default = 'Head',
@@ -1364,92 +1266,8 @@ do
         Callback = function(v) FOV_Circle_Color = v end
     })
 
-    -- SILENT AIM
-    local SAGroup = CombatTab:AddLeftGroupbox('Silent Aim')
-    SAGroup:AddToggle('SA_Enable', {
-        Text = 'Silent Aim (Utils)', Default = false,
-        Tooltip = 'Uses Utils:raycast for everything',
-        Callback = function(v)
-            SA_Enabled = v
-            if v and not SA_Hooked then
-                task.spawn(function()
-                    local attempts = 0
-                    while not SA_Hooked and attempts < 10 do
-                        HookShotRemote()
-                        if not SA_Hooked then task.wait(1) attempts = attempts + 1 end
-                    end
-                end)
-            end
-        end
-    })
-    SAGroup:AddSlider('SA_FOV', {
-        Text = 'Silent Aim FOV', Default = 300, Min = 10, Max = 1000, Rounding = 0, Suffix = 'px',
-        Callback = function(v) SA_FOV = v end
-    })
-    SAGroup:AddDropdown('SA_Part', {
-        Text = 'Target Part', Default = 'Head',
-        Values = { 'Head', 'HumanoidRootPart', 'Torso', 'Random' },
-        Callback = function(v) SA_TargetPart = v end
-    })
-    SAGroup:AddToggle('SA_Visible', {
-        Text = 'Visible Check (Utils:raycast)', Default = true,
-        Callback = function(v) SA_VisibleCheck = v end
-    })
-    SAGroup:AddToggle('SA_Team', {
-        Text = 'Team Check', Default = false,
-        Callback = function(v) SA_TeamCheck = v end
-    })
-    SAGroup:AddToggle('SA_Death', {
-        Text = 'Death Check (HitHandler)', Default = true,
-        Callback = function(v) SA_DeathCheck = v end
-    })
-    SAGroup:AddToggle('SA_Prediction', {
-        Text = 'Prediction (Utils:raycast)', Default = true,
-        Callback = function(v) SA_Prediction = v end
-    })
-    SAGroup:AddSlider('SA_ProjSpeed', {
-        Text = 'Projectile Speed', Default = 2000, Min = 100, Max = 10000, Rounding = 0,
-        Callback = function(v) SA_ProjectileSpeed = v end
-    })
-    SAGroup:AddDivider()
-    SAGroup:AddLabel('Hook: ' .. (SA_Hooked and SA_HookMethod or 'Inactive'))
-    SAGroup:AddLabel('Remote: ' .. (ShotRemote and 'Found' or 'Loading...'))
-    SAGroup:AddLabel('Utils: ' .. (Utils and 'Loaded' or 'Loading...'))
-
-    -- TRIGGERBOT
-    local TBGroup = CombatTab:AddLeftGroupbox('Triggerbot')
-    TBGroup:AddToggle('TB_Enable', {
-        Text = 'Triggerbot', Default = false,
-        Callback = function(v) TB_Enabled = v end
-    })
-    TBGroup:AddSlider('TB_FOV', {
-        Text = 'Trigger FOV', Default = 60, Min = 5, Max = 300, Rounding = 0, Suffix = 'px',
-        Callback = function(v) TB_FOV = v end
-    })
-    TBGroup:AddSlider('TB_Delay', {
-        Text = 'Fire Delay', Default = 0.05, Min = 0.01, Max = 1.0, Rounding = 2, Suffix = 's',
-        Callback = function(v) TB_Delay = v end
-    })
-    TBGroup:AddDropdown('TB_Part', {
-        Text = 'Target Part', Default = 'Torso',
-        Values = { 'Head', 'HumanoidRootPart', 'Torso', 'Random' },
-        Callback = function(v) TB_TargetPart = v end
-    })
-    TBGroup:AddToggle('TB_Visible', {
-        Text = 'Visible Check (Utils)', Default = true,
-        Callback = function(v) TB_VisibleCheck = v end
-    })
-    TBGroup:AddToggle('TB_Team', {
-        Text = 'Team Check', Default = true,
-        Callback = function(v) TB_TeamCheck = v end
-    })
-    TBGroup:AddToggle('TB_Death', {
-        Text = 'Death Check', Default = true,
-        Callback = function(v) TB_DeathCheck = v end
-    })
-
     -- NO RECOIL
-    local NRGroup = CombatTab:AddRightGroupbox('Recoil Control')
+    local NRGroup = CombatTab:AddLeftGroupbox('Recoil Control')
     NRGroup:AddToggle('NR_Enable', {
         Text = 'No Recoil', Default = false,
         Callback = function(v) NR_Enabled = v end
@@ -1593,6 +1411,100 @@ do
         local count = GetDummyCount()
         BotGroup:AddLabel('Count: ' .. tostring(count))
     end)
+end
+
+-- ====================== COSMETICS TAB ======================
+do
+    local CosmeticsTab = Tabs.Cosmetics
+
+    -- CHARM EQUIPPER
+    local CharmGroup = CosmeticsTab:AddLeftGroupbox('Charm Equipper')
+    local CharmDropdown = CharmGroup:AddDropdown('Charm_Select', {
+        Text = 'Select Charm',
+        Default = 'None',
+        Values = { 'None' },
+        Tooltip = 'Scans ReplicatedStorage.Assets.Charms folder',
+        Callback = function(v)
+            Charm_Selected = v
+            if v ~= 'None' then
+                EquipCharm(v)
+            end
+        end
+    })
+
+    -- Populate dropdown after charms load
+    task.delay(4.5, function()
+        if #CharmList > 1 then
+            CharmDropdown:SetValues(CharmList)
+        else
+            -- Try again
+            task.wait(2)
+            BuildCharmList()
+            if #CharmList > 1 then
+                CharmDropdown:SetValues(CharmList)
+            end
+        end
+    end)
+
+    CharmGroup:AddButton('Refresh Charm List', function()
+        BuildCharmList()
+        CharmDropdown:SetValues(CharmList)
+        CharmGroup:AddLabel('Found ' .. tostring(#CharmList - 1) .. ' charms')
+    end)
+
+    CharmGroup:AddButton('Equip Selected', function()
+        if Charm_Selected ~= 'None' then
+            EquipCharm(Charm_Selected)
+        end
+    end)
+
+    CharmGroup:AddButton('Random Charm', function()
+        if #CharmList > 1 then
+            local randomCharm = CharmList[math.random(2, #CharmList)]
+            Charm_Selected = randomCharm
+            CharmDropdown:SetValue(randomCharm)
+            EquipCharm(randomCharm)
+        end
+    end)
+
+    CharmGroup:AddToggle('Charm_AutoRandom', {
+        Text = 'Auto Random (every 5s)',
+        Default = false,
+        Callback = function(v) Charm_AutoRandom = v end
+    })
+
+    CharmGroup:AddDivider()
+    CharmGroup:AddLabel('Charms Found: ' .. tostring(#CharmList - 1))
+    CharmGroup:AddLabel('Folder: ' .. (CharmsFolder and 'Loaded' or 'Loading...'))
+
+    -- SPRAY COLOR CHANGER
+    local SprayGroup = CosmeticsTab:AddRightGroupbox('Spray Color Changer')
+    SprayGroup:AddToggle('SC_Enable', {
+        Text = 'Spray Color Changer',
+        Default = false,
+        Tooltip = 'Modifies spray can model colors',
+        Callback = function(v) SC_Enabled = v end
+    })
+    SprayGroup:AddLabel('Spray Color'):AddColorPicker('SC_Color', {
+        Default = Color3.fromRGB(255, 0, 0),
+        Callback = function(v) SC_Color = v end
+    })
+    SprayGroup:AddButton('Apply to All Spray Cans', function()
+        SC_Enabled = true
+        Update_SprayColor()
+        task.wait(0.1)
+        SC_Enabled = false
+    end)
+    SprayGroup:AddDivider()
+
+    -- Preset colors
+    SprayGroup:AddButton('Red', function() SC_Color = Color3.fromRGB(255, 0, 0) Update_SprayColor() end)
+    SprayGroup:AddButton('Green', function() SC_Color = Color3.fromRGB(0, 255, 0) Update_SprayColor() end)
+    SprayGroup:AddButton('Blue', function() SC_Color = Color3.fromRGB(0, 0, 255) Update_SprayColor() end)
+    SprayGroup:AddButton('Yellow', function() SC_Color = Color3.fromRGB(255, 255, 0) Update_SprayColor() end)
+    SprayGroup:AddButton('Purple', function() SC_Color = Color3.fromRGB(128, 0, 255) Update_SprayColor() end)
+    SprayGroup:AddButton('White', function() SC_Color = Color3.fromRGB(255, 255, 255) Update_SprayColor() end)
+    SprayGroup:AddButton('Black', function() SC_Color = Color3.fromRGB(0, 0, 0) Update_SprayColor() end)
 end
 
 -- ====================== MISC TAB ======================

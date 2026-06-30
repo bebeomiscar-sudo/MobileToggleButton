@@ -1,7 +1,9 @@
 -- ╔══════════════════════════════════════════════════════════════════════╗
--- ║             COMPLETE UNIFIED SCRIPT v9 (NAMECALL SILENT AIM)          ║
--- ║  Silent Aim: hookmetamethod __namecall on ShotRemote (like video)    ║
--- ║  Removed: Ragebot, Utils.raycast hook                                ║
+-- ║              COMPLETE UNIFIED SCRIPT v7 (LEGIT AIMBOT)                ║
+-- ║  Features: Aimbot+Speed+Reaction+LockOn+Distance+DeathCheck          ║
+-- ║  ESP+TeamColors+MatchAware+Spectate, BotESP, Rainbow,                ║
+-- ║  CustomKillFeed, DeviceChanger                                       ║
+-- ║  Removed: Triggerbot, SilentAim, NoRecoil, CharmChanger, SprayColor  ║
 -- ╚══════════════════════════════════════════════════════════════════════╝
 
 -- ====================== LOADER ======================
@@ -117,7 +119,6 @@ local HitHandler = nil
 local States = nil
 local DataHandler = nil
 local DummyClient = nil
-local ShotRemote = nil
 
 task.delay(2, function()
     pcall(function() Neuron = require(RepFirst:WaitForChild('neuron')) end)
@@ -135,8 +136,6 @@ task.delay(3, function()
     pcall(function() WeaponECS = require(RepStorage:WaitForChild('Modules'):WaitForChild('WeaponECS')) end)
     task.wait(0.3)
     pcall(function() TableUtils = require(RepStorage:WaitForChild('Modules'):WaitForChild('TableUtils')) end)
-    task.wait(0.3)
-    pcall(function() ShotRemote = RepStorage:WaitForChild('Remotes'):WaitForChild('shot') end)
     task.wait(0.3)
     pcall(function()
         local ecsFolder = RepStorage:WaitForChild('Modules'):WaitForChild('WeaponECS')
@@ -197,18 +196,6 @@ UserInput.InputEnded:Connect(function(input)
         Aim_IsFiring = false
     end
 end)
-
--- SILENT AIM (NAMECALL HOOK)
-local SA_Enabled = false
-local SA_FOV = 300
-local SA_TargetPart = 'Head'
-local SA_TeamCheck = false
-local SA_DeathCheck = true
-local SA_Distance = 250
-local SA_Hooked = false
-
--- PARTICLE SUPPRESSION
-local PS_Enabled = false
 
 -- ESP
 local ESP_Enabled = true
@@ -289,6 +276,7 @@ local function IsSameTeam(player)
     if not Team_Check then return false end
     if player == LocalPlayer then return true end
 
+    -- Use game's actual team system first
     if GameplayHandler then
         local localTeam = nil
         local playerTeam = nil
@@ -304,36 +292,12 @@ local function IsSameTeam(player)
         end
     end
 
+    -- Fallback: only filter if both players actually have a Roblox team
     if LocalPlayer.Team and player.Team then
         return player.Team == LocalPlayer.Team
     end
 
-    return false
-end
-
-local function IsSameTeamCustom(player, teamCheckEnabled)
-    if not teamCheckEnabled then return false end
-    if player == LocalPlayer then return true end
-
-    if GameplayHandler then
-        local localTeam = nil
-        local playerTeam = nil
-        pcall(function()
-            local _, duelID = GameplayHandler:GetLocalDuel()
-            if duelID then
-                localTeam = GameplayHandler:GetPlayerTeam(duelID, LocalPlayer)
-                playerTeam = GameplayHandler:GetPlayerTeam(duelID, player)
-            end
-        end)
-        if localTeam and playerTeam then
-            return localTeam.id == playerTeam.id
-        end
-    end
-
-    if LocalPlayer.Team and player.Team then
-        return player.Team == LocalPlayer.Team
-    end
-
+    -- No team data available — don't filter
     return false
 end
 
@@ -444,94 +408,6 @@ local function Get_Health(player)
     if not humanoid then return 0 end
     return humanoid.Health / humanoid.MaxHealth
 end
-
--- ====================== SILENT AIM (NAMECALL HOOK) ======================
-local function Get_SilentAim_Target()
-    local closest_player = nil
-    local closest_distance = SA_FOV
-    local screen_center = v2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if IsSameTeamCustom(player, SA_TeamCheck) then continue end
-        if SA_DeathCheck and not IsAlive(player) then continue end
-        resolve_player(player)
-        local char = player.Character
-        if not char then continue end
-        local target_part = Get_Nearest_Part(player, SA_TargetPart)
-        if not target_part then continue end
-        if Get_Distance(player) > SA_Distance then continue end
-        
-        local screen_pos, on_screen = World_To_Screen(target_part.Position)
-        if not on_screen then continue end
-        local dist = (screen_pos - screen_center).Magnitude
-        if dist < closest_distance then
-            closest_distance = dist
-            closest_player = player
-        end
-    end
-    return closest_player
-end
-
-local function HookShotRemote_Namecall()
-    if SA_Hooked then return end
-    if not hookmetamethod then return end
-    if not ShotRemote then return end
-
-    local origNamecall
-    origNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
-        local args = {...}
-        local self = args[1]
-        local method = getnamecallmethod()
-
-        if method == "FireServer" and self == ShotRemote then
-            if SA_Enabled then
-                local target = Get_SilentAim_Target()
-                if target then
-                    local targetPart = Get_Nearest_Part(target, SA_TargetPart)
-                    if targetPart then
-                        local dir = (targetPart.Position - Camera.CFrame.Position).Unit
-                        -- Try to modify arguments based on structure
-                        if typeof(args[2]) == "Vector3" then
-                            args[2] = dir
-                        elseif typeof(args[3]) == "Vector3" then
-                            args[3] = dir
-                        elseif type(args[2]) == "table" then
-                            if args[2].direction then args[2].direction = dir end
-                            if args[2].dir then args[2].dir = dir end
-                            if args[2].position then args[2].position = targetPart.Position end
-                        end
-                        return origNamecall(table.unpack(args))
-                    end
-                end
-            end
-        end
-
-        return origNamecall(...)
-    end))
-    SA_Hooked = true
-end
-
--- Setup hook when ShotRemote is loaded
-task.spawn(function()
-    while not ShotRemote do task.wait(0.5) end
-    HookShotRemote_Namecall()
-end)
-
--- ====================== PARTICLE SUPPRESSION HOOK ======================
-task.delay(4.2, function()
-    if not VFXUtility then return end
-    local origEmit = VFXUtility.EmitParticles
-    VFXUtility.EmitParticles = function(self, obj, ...)
-        if PS_Enabled and typeof(obj) == "Instance" then
-            local name = obj.Name:lower()
-            if name:find("flash") or name:find("smoke") or name:find("blind") then
-                return
-            end
-        end
-        return origEmit(self, obj, ...)
-    end
-end)
 
 -- ====================== FOV CIRCLE ======================
 local FOV_Drawing = Drawing.new('Circle')
@@ -652,7 +528,7 @@ local function IsTargetValid(player)
     local target_part = Get_Nearest_Part(player, Aim_Part)
     if not target_part then return false end
     if Get_Distance(player) > Aim_Distance then return false end
-    if Aim_Visible_Check and Is_Behind_Wall(target_part) then continue end
+    if Aim_Visible_Check and Is_Behind_Wall(target_part) then return false end
     local screen_pos, on_screen = World_To_Screen(target_part.Position)
     if not on_screen then return false end
     local screen_center = v2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
@@ -675,13 +551,17 @@ local function Get_Closest_Target()
     local closest_player = nil
     local closest_distance = Aim_FOV
 
+    -- Check if current target is still valid (target sticking)
     if Aim_CurrentTarget and Aim_CurrentTarget.Parent then
         if IsTargetValid(Aim_CurrentTarget) then
+            -- Current target is still good — give it a stickiness bonus
+            -- Only switch if another target is 40% closer to crosshair
             local current_dist = GetScreenDistance(Aim_CurrentTarget)
 
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= Aim_CurrentTarget and IsTargetValid(player) then
                     local new_dist = GetScreenDistance(player)
+                    -- Need to be 40% closer to switch targets
                     if new_dist < current_dist * 0.6 then
                         closest_player = player
                         closest_distance = new_dist
@@ -696,6 +576,7 @@ local function Get_Closest_Target()
         end
     end
 
+    -- No current target — find closest
     Aim_CurrentTarget = nil
     for _, player in ipairs(Players:GetPlayers()) do
         if IsTargetValid(player) then
@@ -729,6 +610,7 @@ local function Aim_At_Target(player)
     local currentPitch = currentRot.X
     local currentYaw = currentRot.Y
 
+    -- Robust yaw difference calculation (fixes flickering)
     local deltaYaw = targetYaw - currentYaw
     while deltaYaw > math.pi do
         deltaYaw = deltaYaw - 2 * math.pi
@@ -739,6 +621,7 @@ local function Aim_At_Target(player)
 
     local deltaPitch = targetPitch - currentPitch
 
+    -- Speed calculation
     local base_speed = Aim_IsFiring and Aim_SpeedInAttack or Aim_Speed
     local effective_speed = base_speed * (Aim_SpeedScale / 100)
     local alpha = math.clamp(effective_speed, 0.001, 1)
@@ -760,6 +643,7 @@ local function Update_Aimbot()
 
     local now = tick()
 
+    -- Max lock on time check
     if Aim_MaxLockOnTime > 0 and Aim_CurrentTarget and (now - Aim_LockOnStart) >= Aim_MaxLockOnTime then
         Aim_CurrentTarget = nil
         Aim_IsReacting = false
@@ -768,23 +652,28 @@ local function Update_Aimbot()
 
     local target = Get_Closest_Target()
 
+    -- Handle target switching with reaction time
     if target ~= Aim_CurrentTarget then
         if target then
+            -- New target acquired — start reaction timer
             if not Aim_IsReacting then
                 Aim_IsReacting = true
                 Aim_ReactionStart = now
                 return
             end
 
+            -- Check if reaction time has passed
             local reaction_seconds = Aim_ReactionTime / 1000
             if (now - Aim_ReactionStart) < reaction_seconds then
-                return
+                return -- Still reacting
             end
 
+            -- Reaction time passed — switch target
             Aim_CurrentTarget = target
             Aim_LockOnStart = now
             Aim_IsReacting = false
         else
+            -- No target
             Aim_CurrentTarget = nil
             Aim_IsReacting = false
             return
@@ -1260,8 +1149,7 @@ end)
 do
     local CombatTab = Tabs.Combat
 
-    -- AIMBOT
-    local AimBox = CombatTab:AddLeftGroupbox('Legit Aimbot')
+    local AimBox = CombatTab:AddLeftGroupbox('Aimbot')
     AimBox:AddToggle('Aimbot_Enabled', {
         Text = 'Aimbot', Default = false,
         Tooltip = 'Legit aimbot with speed system',
@@ -1273,22 +1161,27 @@ do
     })
     AimBox:AddSlider('Aim_Speed', {
         Text = 'Speed', Default = 0.3, Min = 0.1, Max = 5, Rounding = 2,
+        Tooltip = 'How fast the aimbot moves toward target',
         Callback = function(v) Aim_Speed = v end
     })
     AimBox:AddSlider('Aim_SpeedInAttack', {
         Text = 'Speed in Attack', Default = 0.15, Min = 0.1, Max = 5, Rounding = 2,
+        Tooltip = 'Speed when firing (lower = more legit)',
         Callback = function(v) Aim_SpeedInAttack = v end
     })
     AimBox:AddSlider('Aim_SpeedScale', {
         Text = 'Speed Scale', Default = 100, Min = 0, Max = 100, Rounding = 0, Suffix = '%',
+        Tooltip = 'Global speed multiplier',
         Callback = function(v) Aim_SpeedScale = v end
     })
     AimBox:AddSlider('Aim_MaxLockOnTime', {
         Text = 'Max Lock On Time', Default = 0, Min = 0, Max = 10, Rounding = 1, Suffix = 's',
+        Tooltip = 'Releases target after this time (0 = never)',
         Callback = function(v) Aim_MaxLockOnTime = v end
     })
     AimBox:AddSlider('Aim_ReactionTime', {
         Text = 'Reaction Time', Default = 0, Min = 0, Max = 500, Rounding = 0, Suffix = 'ms',
+        Tooltip = 'Delay before tracking new target',
         Callback = function(v) Aim_ReactionTime = v end
     })
     AimBox:AddSlider('Aim_Distance', {
@@ -1301,49 +1194,18 @@ do
         Callback = function(v) Aim_Part = v end
     })
     AimBox:AddToggle('Aim_DeathCheck', {
-        Text = 'Death Check', Default = true,
+        Text = 'Death Check (HitHandler)', Default = true,
         Callback = function(v) Aim_DeathCheck = v end
     })
 
-    -- SILENT AIM
-    local SABox = CombatTab:AddLeftGroupbox('Silent Aim (Namecall)')
-    SABox:AddToggle('SA_Enable', {
-        Text = 'Silent Aim', Default = false,
-        Tooltip = 'Hooks __namecall on ShotRemote',
-        Callback = function(v) SA_Enabled = v end
-    })
-    SABox:AddSlider('SA_FOV', {
-        Text = 'FOV', Default = 300, Min = 10, Max = 1000, Rounding = 0, Suffix = 'px',
-        Callback = function(v) SA_FOV = v end
-    })
-    SABox:AddSlider('SA_Distance', {
-        Text = 'Max Distance', Default = 250, Min = 0, Max = 1000, Rounding = 0, Suffix = ' studs',
-        Callback = function(v) SA_Distance = v end
-    })
-    SABox:AddDropdown('SA_Part', {
-        Text = 'Target Part', Default = 'Head',
-        Values = { 'Head', 'HumanoidRootPart', 'Torso', 'Random' },
-        Callback = function(v) SA_TargetPart = v end
-    })
-    SABox:AddToggle('SA_Team', {
-        Text = 'Team Check', Default = false,
-        Callback = function(v) SA_TeamCheck = v end
-    })
-    SABox:AddToggle('SA_Death', {
-        Text = 'Death Check', Default = true,
-        Callback = function(v) SA_DeathCheck = v end
-    })
-    SABox:AddDivider()
-    SABox:AddLabel('Hook: ' .. (SA_Hooked and '__namecall Active' or 'Loading...'))
-
-    -- CHECKS
     local CheckBox = CombatTab:AddRightGroupbox('Checks')
     CheckBox:AddToggle('Visible_Check', {
-        Text = 'Visible Check (Aimbot)', Default = true,
+        Text = 'Visible Check', Default = true,
         Callback = function(v) Aim_Visible_Check = v end
     })
     CheckBox:AddToggle('Team_Check', {
-        Text = 'Team Check (Aimbot/ESP)', Default = false,
+        Text = 'Team Check (Game Internal)', Default = false,
+        Tooltip = 'Uses GameplayHandler team data, not Roblox teams',
         Callback = function(v) Team_Check = v end
     })
     CheckBox:AddDivider()
@@ -1359,14 +1221,6 @@ do
     CheckBox:AddLabel('FOV Color'):AddColorPicker('FOV_Color', {
         Default = Color3.fromRGB(255, 255, 255),
         Callback = function(v) FOV_Circle_Color = v end
-    })
-
-    -- PARTICLE SUPPRESSION
-    local PSBox = CombatTab:AddRightGroupbox('Particle Suppression')
-    PSBox:AddToggle('PS_Enable', {
-        Text = 'Block Flash/Smoke', Default = false,
-        Tooltip = 'Hooks VFXUtility.EmitParticles',
-        Callback = function(v) PS_Enabled = v end
     })
 end
 
@@ -1396,7 +1250,7 @@ do
         Callback = function(v) Name_Color = v end
     })
     ESPBox:AddToggle('Health', {
-        Text = 'Health Bar', Default = true,
+        Text = 'Health Bar (States)', Default = true,
         Callback = function(v) Health_Enabled = v end
     })
     ESPBox:AddToggle('Distance', {

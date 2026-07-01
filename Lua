@@ -42,7 +42,7 @@ local ThemeManager = LoadModule(linoriaRepo .. 'addons/ThemeManager.lua', 'Theme
 local SaveManager = LoadModule(linoriaRepo .. 'addons/SaveManager.lua', 'SaveManager.lua')
 
 local Window = Library:CreateWindow({
-    Title = 'Overload Hub',
+    Title = 'logic',
     Center = true,
     AutoShow = true,
     TabPadding = 8,

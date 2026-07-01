@@ -1,5 +1,5 @@
 -- Overkill Script v7
--- Features: Aimbot, ESP, MatchAware, BotESP, Rainbow, KillFeed, DeviceChanger, UnlockAll
+-- Features: Aimbot, ESP, MatchAware, BotESP, Rainbow, KillFeed, DeviceChanger, UnlockAll, LeaderboardSpoof
 
 -- ====================== LOADER ======================
 local myRepoCandidates = {
@@ -42,7 +42,7 @@ local ThemeManager = LoadModule(linoriaRepo .. 'addons/ThemeManager.lua', 'Theme
 local SaveManager = LoadModule(linoriaRepo .. 'addons/SaveManager.lua', 'SaveManager.lua')
 
 local Window = Library:CreateWindow({
-    Title = 'Logic',
+    Title = 'logic',
     Center = true,
     AutoShow = true,
     TabPadding = 8,
@@ -226,6 +226,10 @@ local KF_Pool = {}
 local DC_Enabled = false
 local DC_Device = '1'
 local DC_Hooked = false
+
+local LB_Enabled = false
+local LB_Level = 999
+local LB_Streak = 999
 
 -- ====================== HELPERS ======================
 local v2_new = Vector2.new
@@ -1217,6 +1221,41 @@ local function InitUnlockAll()
     end)
 end
 
+-- ====================== LEADERBOARD SPOOF ======================
+local function Update_Leaderboard_Spoof()
+    if not LB_Enabled then return end
+    pcall(function()
+        local lb = Workspace:FindFirstChild("Objects")
+        lb = lb and lb:FindFirstChild("Screen")
+        lb = lb and lb:FindFirstChild("Leaderboard")
+        if not lb then return end
+        
+        local lpName = LocalPlayer.DisplayName
+        local lpUserName = LocalPlayer.Name
+        
+        for _, desc in ipairs(lb:GetDescendants()) do
+            if desc:IsA("TextLabel") then
+                local txt = desc.Text
+                if txt and (txt == lpName or txt == lpUserName or txt:find(lpName) or txt:find(lpUserName)) then
+                    local parent = desc.Parent
+                    if parent then
+                        for _, sibling in ipairs(parent:GetChildren()) do
+                            if sibling:IsA("TextLabel") and sibling ~= desc then
+                                local t = sibling.Text:lower()
+                                if t:find("lvl") or t:find("level") then
+                                    sibling.Text = "Lvl. " .. tostring(LB_Level)
+                                elseif t:find("streak") or t:find("ws") or t:find("win") then
+                                    sibling.Text = tostring(LB_Streak) .. " WS"
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
 -- ====================== RENDER LOOPS ======================
 RunService.RenderStepped:Connect(function()
     Update_ESP()
@@ -1226,6 +1265,7 @@ RunService.RenderStepped:Connect(function()
     Update_Rainbow()
     Update_KillFeed()
     Update_DeviceChanger()
+    Update_Leaderboard_Spoof()
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -1459,6 +1499,11 @@ do
             Library:Notify({Title = "Unlock All", Content = "Unlock All initialized! Rejoin if it doesn't apply instantly.", Duration = 5})
         end
     end })
+    
+    local LBSpoofGroup = MiscTab:AddRightGroupbox('Leaderboard Spoof')
+    LBSpoofGroup:AddToggle('LB_Enable', { Text = 'Enable Spoof', Default = false, Callback = function(v) LB_Enabled = v end })
+    LBSpoofGroup:AddInput('LB_Level', { Text = 'Fake Level', Default = '999', Numeric = true, Callback = function(v) LB_Level = tonumber(v) or 0 end })
+    LBSpoofGroup:AddInput('LB_Streak', { Text = 'Fake Winstreak', Default = '999', Numeric = true, Callback = function(v) LB_Streak = tonumber(v) or 0 end })
 end
 
 -- ====================== SETTINGS TAB ======================
